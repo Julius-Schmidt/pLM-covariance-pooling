@@ -29,15 +29,27 @@ class CovariancePCAPooler(Pooler):
 
         C = (1 / L_valid) (X U)ᵀ (X U)   ∈   R^{dc × dc}
 
-    where ``U`` holds the top-dc eigenvectors of the dataset-wide centred
-    residue covariance Σ = E[(x − μ)(x − μ)ᵀ].
+    where ``U`` holds the top-dc eigenvectors of the protein-weighted dataset
+    covariance:
+
+        Σ = (1 / N_proteins) Σ_t  (1 / Lₜ) Xₜ_centeredᵀ Xₜ_centered
+
+    Weighting by 1/Lₜ makes each protein contribute equally regardless of
+    sequence length, so long proteins do not dominate the principal directions.
 
     Streaming two-pass fit so the d × N residue matrix never has to live in
-    memory all at once.
+    memory all at once. All accumulation runs in float64 — pLM embeddings
+    cluster tightly around a non-zero mean and a float32 (``X − μ``) loses
+    most of its significant digits to cancellation.
     """
 
     def __init__(self, d: int, dc: int, center: bool = True) -> None:
         super().__init__()
+        if dc <= 0:
+            raise ValueError(f"dc must be positive, got {dc}")
+        if dc > d:
+            raise ValueError(f"dc ({dc}) cannot exceed d ({d})")
+
         self._d = d
         self._dc = dc
         self._center = center
@@ -58,29 +70,40 @@ class CovariancePCAPooler(Pooler):
             get_iter: Callable that returns a fresh iterator of (X, mask)
                       pairs each time it is invoked. Called twice.
         """
-        # Pass 1 — accumulate residue mean (float64 for stability).
-        n = 0
+        # ---- Pass 1 — residue-weighted mean (float64 throughout) ----
+        n_residues = 0
+        n_proteins = 0
         sum_x = torch.zeros(self._d, dtype=torch.float64)
         for X, mask in get_iter():
-            X_valid = X[mask.bool()].double()
+            X_valid = X[mask.bool()].double()        # cast BEFORE any arithmetic
+            L = X_valid.shape[0]
+            if L == 0:
+                continue
             sum_x += X_valid.sum(0)
-            n += X_valid.shape[0]
-        if n == 0:
+            n_residues += L
+            n_proteins += 1
+        if n_residues == 0:
             raise ValueError("No valid residues found in the provided embeddings.")
 
-        mean = (sum_x / n).float() if self._center else torch.zeros(self._d)
+        # Keep mean64 in float64 so pass 2's subtraction does not lose precision.
+        mean64 = (sum_x / n_residues) if self._center \
+            else torch.zeros(self._d, dtype=torch.float64)
 
-        # Pass 2 — accumulate centred scatter matrix.
+        # ---- Pass 2 — protein-weighted scatter matrix (float64 throughout) ----
         cov = torch.zeros(self._d, self._d, dtype=torch.float64)
         for X, mask in get_iter():
-            Xc = (X[mask.bool()] - mean).double()
-            cov += Xc.T @ Xc
-        cov /= max(n - 1, 1)
+            X_valid = X[mask.bool()].double()
+            L = X_valid.shape[0]
+            if L == 0:
+                continue
+            Xc = X_valid - mean64                   # subtraction in float64
+            cov += (Xc.T @ Xc) / L                  # per-protein contribution
+        cov /= max(n_proteins - 1, 1)               # unbiased over proteins
 
-        # eigh returns eigenvalues ascending — keep the top-dc.
-        _, eigvecs = torch.linalg.eigh(cov.float())
-        self.proj.copy_(eigvecs[:, -self._dc:].contiguous())
-        self.mean.copy_(mean)
+        # Keep float64 through the eigendecomposition; cast result down once.
+        _, eigvecs = torch.linalg.eigh(cov)
+        self.proj.copy_(eigvecs[:, -self._dc:].float().contiguous())
+        self.mean.copy_(mean64.float())
         self._fitted = True
         return self
 
