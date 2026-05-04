@@ -18,11 +18,14 @@ Given per-residue embeddings **X** ∈ ℝ^{L×d} from frozen ProtX:
 |---|---|---|---|
 | Mean (baseline) | μ = (1/L) Xᵀ𝟏 | d | 0 |
 | Covariance, supervised | C = (1/L)(XL)ᵀ(XR), L, R trained end-to-end | dc² | 2·d·dc |
-| Covariance, unsupervised | C = (1/L)(XL)ᵀ(XR), L, R fitted by Frobenius reconstruction of XᵀX, then frozen | dc² | 2·d·dc (frozen) |
+| Covariance, unsupervised (autoencoder) | C = (1/L)(XL)ᵀ(XR), L, R fitted by Frobenius reconstruction of XᵀX, then frozen | dc² | 2·d·dc (frozen) |
+| Covariance, PCA | C = (1/L)(XU)ᵀ(XU), U = top-dc eigenvectors of dataset Σ — closed-form, no SGD | dc² | d·dc (frozen) |
 | Hybrid | [μ ; flat(C)] | d + dc² | 2·d·dc |
 
-L, R ∈ ℝ^{d×dc} are two independent learnable projections (so C is asymmetric in general). The unsupervised regime trains them by minimising
+L, R ∈ ℝ^{d×dc} are two independent learnable projections — C is asymmetric in general. The unsupervised autoencoder trains them by minimising
 ‖XᵀX − L (XL)ᵀ(XR) Rᵀ‖²_F using the Frobenius equivalence ‖XᵀX‖_F = ‖XXᵀ‖_F so that no per-protein d×d matrix is materialised.
+
+The **PCA** variant is the symmetric / tied-weights special case of the autoencoder (L = R = U, so C is symmetric and PSD). It needs no training — just two streaming passes over the data and an eigendecomposition. Useful as a sanity-check baseline: does the autoencoder's extra freedom (asymmetric L, R, SGD) buy anything over the closed-form solution?
 
 Every method feeds its pooled vector to the **same FNN probe head**, so comparisons are apples-to-apples.
 
@@ -34,6 +37,7 @@ Every method feeds its pooled vector to the **same FNN probe head**, so comparis
 │   │   ├── base.py            # Pooler(nn.Module) interface
 │   │   ├── mean.py            # MeanPooler
 │   │   ├── covariance.py      # CovariancePooler — two learnable projections L, R
+│   │   ├── covariance_pca.py  # CovariancePCAPooler — closed-form top-dc PCA
 │   │   └── hybrid.py          # HybridPooler — [μ ; flat(C)] concat
 │   ├── unsupervised/
 │   │   └── frobenius_trainer.py   # autoencoder for ‖XᵀX − L C̃ Rᵀ‖²_F
@@ -48,11 +52,12 @@ Every method feeds its pooled vector to the **same FNN probe head**, so comparis
 │   └── analysis/              # aggregation + plots + cov visualisations
 ├── scripts/
 │   ├── extract_embeddings.py     # ProtX → HDF5 (supports --layers for sweep)
-│   ├── train_unsupervised_pool.py# fit + freeze the autoencoder
+│   ├── train_unsupervised_pool.py# fit + freeze the autoencoder (SGD)
+│   ├── fit_pca_pool.py           # fit + freeze the PCA pooler (closed-form)
 │   └── run_experiment.py         # train pooler + probe → JSON in results/runs/
 ├── configs/
-│   ├── scl/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml
-│   └── meltome/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml
+│   ├── scl/{mean,cov_supervised,cov_unsupervised,cov_pca,hybrid}.yaml
+│   └── meltome/{mean,cov_supervised,cov_unsupervised,cov_pca,hybrid}.yaml
 ├── tests/                     # pytest suite (masking invariance + correctness)
 └── data/
     ├── raw/{deeploc,meltome}/  # FASTA + label CSVs (not tracked)
@@ -94,17 +99,24 @@ python scripts/extract_embeddings.py \
     --batch-size 4 --device cuda
 ```
 
-### 2 · (Optional) Fit the unsupervised autoencoder once
+### 2 · (Optional) Fit a frozen unsupervised pooler once
+
+Two flavours, both reusable across tasks via `pretrained_path` in the configs:
 
 ```bash
+# Frobenius autoencoder — learnable L, R via SGD
 python scripts/train_unsupervised_pool.py \
     --embeddings data/embeddings/deeploc_train.h5 \
     --d 1024 --dc 32 \
     --epochs 5 --batch-size 32 --lr 1e-3 \
     --output models/unsup_pooler_dc32.pt
-```
 
-The resulting checkpoint is reusable across tasks — point any `cov_unsupervised.yaml` config at it via `pretrained_path`.
+# PCA — closed-form top-dc eigenvectors of the dataset covariance
+python scripts/fit_pca_pool.py \
+    --embeddings data/embeddings/deeploc_train.h5 \
+    --d 1024 --dc 32 \
+    --output models/pca_pooler_dc32.pt
+```
 
 ### 3 · Run experiments
 
@@ -115,8 +127,11 @@ python scripts/run_experiment.py --config configs/scl/mean.yaml
 # Supervised covariance (L, R trained with the probe)
 python scripts/run_experiment.py --config configs/scl/cov_supervised.yaml
 
-# Frozen unsupervised covariance (loads pretrained_path)
+# Frozen unsupervised covariance (autoencoder, loads pretrained_path)
 python scripts/run_experiment.py --config configs/scl/cov_unsupervised.yaml
+
+# PCA covariance (closed-form, loads pretrained_path)
+python scripts/run_experiment.py --config configs/scl/cov_pca.yaml
 
 # Hybrid [μ ; flat(C)]
 python scripts/run_experiment.py --config configs/scl/hybrid.yaml
@@ -153,7 +168,7 @@ For Meltome, `label` is a floating-point melting temperature (°C).
 
 | Config | Task | Metric |
 |---|---|---|
-| `configs/scl/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml` | Subcellular localisation (10-class) | Accuracy |
-| `configs/meltome/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml` | Thermostability (regression) | Spearman R |
+| `configs/scl/{mean,cov_supervised,cov_unsupervised,cov_pca,hybrid}.yaml` | Subcellular localisation (10-class) | Accuracy |
+| `configs/meltome/{mean,cov_supervised,cov_unsupervised,cov_pca,hybrid}.yaml` | Thermostability (regression) | Spearman R |
 
-Core grid: 4 pooling methods × 2 tasks × 3 seeds = 24 runs. dc sweep: dc ∈ {8, 16, 24, 32, 48} on both tasks. Layer sweep: re-run with embeddings from different ProtX layers.
+Core grid: 5 pooling methods × 2 tasks × 3 seeds = 30 runs. dc sweep: dc ∈ {8, 16, 24, 32, 48} on both tasks. Layer sweep: re-run with embeddings from different ProtX layers.

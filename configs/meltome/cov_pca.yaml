@@ -1,0 +1,25 @@
+# Closed-form (PCA) covariance pooling on Meltome thermostability.
+# Algorithmic alternative to the autoencoder — no SGD, no hyperparameters.
+task: regression
+
+data:
+  train_embeddings: data/embeddings/meltome_train.h5
+  test_embeddings:  data/embeddings/meltome_test.h5
+  train_labels:     data/raw/meltome/train_labels.csv
+  test_labels:      data/raw/meltome/test_labels.csv
+
+pooling:
+  method: cov_pca
+  d: 1024
+  dc: 32
+  pretrained_path: models/pca_pooler_dc32.pt
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 16
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

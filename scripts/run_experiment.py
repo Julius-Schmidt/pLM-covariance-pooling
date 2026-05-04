@@ -37,6 +37,7 @@ from torch.utils.data import DataLoader
 from sop.data.store import EmbeddingStore
 from sop.pooling.base import Pooler
 from sop.pooling.covariance import CovariancePooler
+from sop.pooling.covariance_pca import CovariancePCAPooler
 from sop.pooling.hybrid import HybridPooler
 from sop.pooling.mean import MeanPooler
 from sop.probes.dataset import ProteinEmbeddingDataset, collate_pad
@@ -88,6 +89,15 @@ def build_pooler(pooling_cfg: dict) -> Pooler:
             )
         return CovariancePooler.from_pretrained(ckpt)
 
+    if method == "cov_pca":
+        ckpt = Path(pooling_cfg["pretrained_path"])
+        if not ckpt.exists():
+            raise FileNotFoundError(
+                f"PCA covariance checkpoint not found: {ckpt}. "
+                "Run scripts/fit_pca_pool.py first."
+            )
+        return CovariancePCAPooler.from_pretrained(ckpt)
+
     if method == "hybrid":
         dc = pooling_cfg["dc"]
         cov = CovariancePooler(d, dc)
@@ -97,7 +107,7 @@ def build_pooler(pooling_cfg: dict) -> Pooler:
 
     raise ValueError(
         f"Unknown pooling method '{method}'. "
-        "Choose mean | cov_supervised | cov_unsupervised | hybrid."
+        "Choose mean | cov_supervised | cov_unsupervised | cov_pca | hybrid."
     )
 
 
