@@ -1,0 +1,25 @@
+# Supervised covariance pooling on subcellular localisation.
+# Both projections L, R are trained end-to-end with the probe head.
+# Sweep dc with: python scripts/run_experiment.py --config configs/scl/cov_supervised.yaml --dc 8 16 24 32 48
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc_train.h5
+  test_embeddings:  data/embeddings/deeploc_test.h5
+  train_labels:     data/raw/deeploc/train_labels.csv
+  test_labels:      data/raw/deeploc/test_labels.csv
+
+pooling:
+  method: cov_supervised
+  d: 1024
+  dc: 32                 # bottleneck; output is dc² = 1024 floats
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 16
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

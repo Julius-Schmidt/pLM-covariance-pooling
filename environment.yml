@@ -6,14 +6,18 @@ channels:
 dependencies:
   - python=3.11
   - pytorch>=2.1
-  - pytorch-cuda=12.1      # remove or change if CPU-only
-  - cpuonly                # uncomment this AND remove pytorch-cuda for CPU
+  # CPU-only by default — local laptops run probe training and analysis only.
+  # Embedding extraction (the GPU-heavy step) runs on Google Colab, which uses
+  # its own environment. To run locally on a CUDA box, swap the two lines below.
+  - cpuonly
+  # - pytorch-cuda=12.1
   - h5py>=3.9
   - numpy>=1.26
   - scikit-learn>=1.4
   - scipy>=1.12
   - pyyaml>=6.0
   - matplotlib>=3.8
+  - pandas>=2.0
   - seaborn>=0.13
   - pytest>=8.0
   - pytest-cov

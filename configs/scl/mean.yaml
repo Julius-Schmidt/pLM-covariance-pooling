@@ -1,4 +1,4 @@
-# Baseline: mean pooling on DeepLoc subcellular localisation (10-class).
+# Mean-pooling baseline on subcellular localisation (10-class, residues_to_class).
 task: classification
 
 data:
@@ -12,7 +12,11 @@ pooling:
   d: 1024                # ProtX hidden dimension
 
 probe:
-  C: 1.0                 # Logistic regression regularisation
-  max_iter: 1000
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 16
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
 
 seeds: [0, 1, 2]

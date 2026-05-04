@@ -1,4 +1,4 @@
-# Covariance pooling, dc=32, on Meltome thermostability regression.
+# Hybrid pooling [μ ; flat(C)] on Meltome thermostability.
 task: regression
 
 data:
@@ -8,13 +8,17 @@ data:
   test_labels:      data/raw/meltome/test_labels.csv
 
 pooling:
-  method: covariance
+  method: hybrid
   d: 1024
   dc: 32
-  center: true
-  proj_cache: models/meltome_proj_dc32.pt
+  # pretrained_path: models/unsup_pooler_dc32.pt   # uncomment to freeze cov branch
 
 probe:
-  alpha: 1.0
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 16
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
 
 seeds: [0, 1, 2]

@@ -20,7 +20,13 @@ results/*.json
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
 # IDE
 .vscode/

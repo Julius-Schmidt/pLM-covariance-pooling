@@ -14,11 +14,13 @@ dependencies = [
     "scikit-learn>=1.4",
     "scipy>=1.12",
     "pyyaml>=6.0",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]
 extract = ["transformers>=4.38", "sentencepiece"]
-vis = ["matplotlib>=3.8", "seaborn>=0.13", "umap-learn>=0.5"]
+vis = ["seaborn>=0.13", "umap-learn>=0.5"]
 dev = ["pytest>=8.0", "pytest-cov"]
 
 [tool.setuptools.packages.find]

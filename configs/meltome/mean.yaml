@@ -1,4 +1,4 @@
-# Baseline: mean pooling on Meltome thermostability regression.
+# Mean-pooling baseline on Meltome thermostability (regression, residues_to_value).
 task: regression
 
 data:
@@ -12,6 +12,11 @@ pooling:
   d: 1024
 
 probe:
-  alpha: 1.0             # Ridge regression regularisation
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 16
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
 
 seeds: [0, 1, 2]

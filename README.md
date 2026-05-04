@@ -14,32 +14,48 @@ Does compressing per-residue ProtX embeddings via **covariance pooling** improve
 
 Given per-residue embeddings **X** ∈ ℝ^{L×d} from frozen ProtX:
 
-| Method | Formula | Output dim |
-|---|---|---|
-| Mean pooling (baseline) | μ = (1/L) Xᵀ1 | d |
-| Covariance pooling | C = (1/L)(XU)ᵀ(XU), U from PCA | dc² |
+| Method | Formula | Output dim | Trainable params |
+|---|---|---|---|
+| Mean (baseline) | μ = (1/L) Xᵀ𝟏 | d | 0 |
+| Covariance, supervised | C = (1/L)(XL)ᵀ(XR), L, R trained end-to-end | dc² | 2·d·dc |
+| Covariance, unsupervised | C = (1/L)(XL)ᵀ(XR), L, R fitted by Frobenius reconstruction of XᵀX, then frozen | dc² | 2·d·dc (frozen) |
+| Hybrid | [μ ; flat(C)] | d + dc² | 2·d·dc |
 
-U ∈ ℝ^{d×dc} contains the top-dc eigenvectors of the dataset-wide residue covariance **Σ = E[(x−μ)(x−μ)ᵀ]**, fitted once on training data and reused across tasks.
+L, R ∈ ℝ^{d×dc} are two independent learnable projections (so C is asymmetric in general). The unsupervised regime trains them by minimising
+‖XᵀX − L (XL)ᵀ(XR) Rᵀ‖²_F using the Frobenius equivalence ‖XᵀX‖_F = ‖XXᵀ‖_F so that no per-protein d×d matrix is materialised.
+
+Every method feeds its pooled vector to the **same FNN probe head**, so comparisons are apples-to-apples.
 
 ## Project Structure
 
 ```
 ├── src/sop/
 │   ├── pooling/
-│   │   ├── base.py          # Abstract Pooler interface
-│   │   ├── mean.py          # MeanPooler
-│   │   └── covariance.py    # CovariancePooler (PCA-based)
-│   ├── data/
-│   │   └── store.py         # HDF5 embedding store
-│   └── utils/
-│       └── masking.py       # make_mask, apply_mask
+│   │   ├── base.py            # Pooler(nn.Module) interface
+│   │   ├── mean.py            # MeanPooler
+│   │   ├── covariance.py      # CovariancePooler — two learnable projections L, R
+│   │   └── hybrid.py          # HybridPooler — [μ ; flat(C)] concat
+│   ├── unsupervised/
+│   │   └── frobenius_trainer.py   # autoencoder for ‖XᵀX − L C̃ Rᵀ‖²_F
+│   ├── probes/
+│   │   ├── fnn.py             # ProbeFNN (1 hidden layer, ReLU + dropout)
+│   │   ├── model.py           # PoolingProbeModel = pooler + probe
+│   │   ├── dataset.py         # ProteinEmbeddingDataset + collate_pad
+│   │   ├── train_loop.py      # generic torch train loop (CE / MSE)
+│   │   └── metrics.py         # accuracy, Spearman R
+│   ├── data/store.py          # HDF5 embedding store
+│   ├── utils/masking.py       # make_mask, apply_mask
+│   └── analysis/              # aggregation + plots + cov visualisations
 ├── scripts/
-│   ├── extract_embeddings.py   # ProtX → HDF5
-│   └── run_experiment.py       # pool → probe → metrics
-├── configs/                    # One YAML per (task, method) combination
-├── tests/                      # Pytest suite (masking invariance + unit tests)
+│   ├── extract_embeddings.py     # ProtX → HDF5 (supports --layers for sweep)
+│   ├── train_unsupervised_pool.py# fit + freeze the autoencoder
+│   └── run_experiment.py         # train pooler + probe → JSON in results/runs/
+├── configs/
+│   ├── scl/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml
+│   └── meltome/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml
+├── tests/                     # pytest suite (masking invariance + correctness)
 └── data/
-    ├── raw/{deeploc,meltome}/  # Sequences + label CSVs (not tracked)
+    ├── raw/{deeploc,meltome}/  # FASTA + label CSVs (not tracked)
     └── embeddings/             # HDF5 caches (not tracked)
 ```
 
@@ -51,52 +67,79 @@ conda activate sop
 pip install -e .
 ```
 
-> **GPU note:** edit `environment.yml` to match your CUDA version, or swap
-> `pytorch-cuda` for `cpuonly` if running on CPU.
+> **GPU note:** edit [environment.yml](environment.yml) to swap `pytorch-cuda` for `cpuonly` if running without a GPU. Don't have both active at once.
+
+ProtX inference is GPU-heavy; we run it on Google Colab and download the resulting HDF5 caches into `data/embeddings/`. All downstream training (probe head, autoencoder, analysis) runs locally on the cached tensors.
 
 ## Workflow
 
-### Step 1 — Extract per-residue embeddings (once per split)
+### 1 · Extract per-residue embeddings (once per split, on Colab)
 
 ```bash
 python scripts/extract_embeddings.py \
     --sequences data/raw/deeploc/train.fasta \
     --model /path/to/protx_checkpoint \
     --output data/embeddings/deeploc_train.h5 \
-    --batch-size 4 \
-    --device cuda
+    --batch-size 4 --device cuda
 ```
 
-Repeat for each split (`train`, `test`) and each dataset (`deeploc`, `meltome`).
+For the layer sweep, request multiple hidden states in one pass — each one becomes its own H5:
 
-### Step 2 — Run experiment
+```bash
+python scripts/extract_embeddings.py \
+    --sequences data/raw/deeploc/train.fasta \
+    --model /path/to/protx_checkpoint \
+    --output data/embeddings/deeploc_train.h5 \
+    --layers last 4 12 24 \
+    --batch-size 4 --device cuda
+```
+
+### 2 · (Optional) Fit the unsupervised autoencoder once
+
+```bash
+python scripts/train_unsupervised_pool.py \
+    --embeddings data/embeddings/deeploc_train.h5 \
+    --d 1024 --dc 32 \
+    --epochs 5 --batch-size 32 --lr 1e-3 \
+    --output models/unsup_pooler_dc32.pt
+```
+
+The resulting checkpoint is reusable across tasks — point any `cov_unsupervised.yaml` config at it via `pretrained_path`.
+
+### 3 · Run experiments
 
 ```bash
 # Mean pooling baseline
-python scripts/run_experiment.py --config configs/deeploc_mean.yaml
+python scripts/run_experiment.py --config configs/scl/mean.yaml
 
-# Covariance pooling (fits PCA projection on first run, caches to models/)
-python scripts/run_experiment.py --config configs/deeploc_cov_dc32.yaml
+# Supervised covariance (L, R trained with the probe)
+python scripts/run_experiment.py --config configs/scl/cov_supervised.yaml
 
-# dc sweep (8, 16, 24, 32, 48)
+# Frozen unsupervised covariance (loads pretrained_path)
+python scripts/run_experiment.py --config configs/scl/cov_unsupervised.yaml
+
+# Hybrid [μ ; flat(C)]
+python scripts/run_experiment.py --config configs/scl/hybrid.yaml
+
+# dc sweep
 python scripts/run_experiment.py \
-    --config configs/deeploc_cov_dc32.yaml \
+    --config configs/scl/cov_supervised.yaml \
     --dc 8 16 24 32 48
 ```
 
-Results are written to `results/` as JSON files.
+Results land under `results/runs/` as one JSON per (config, dc) with per-seed and aggregated metrics.
 
-### Step 3 — Run tests
+### 4 · Tests
 
 ```bash
 pytest
 ```
 
-The test suite verifies the critical **masking invariance**: adding zero-padded rows must never change the pooled result.
+Covers masking invariance (mean / covariance / hybrid), the Frobenius reconstruction identity, gradient flow through the supervised pooler, and the probe train-loop on both classification and regression.
 
 ## Label CSV format
 
-Both `train_labels.csv` and `test_labels.csv` must have a header row and two columns:
+Both `train_labels.csv` and `test_labels.csv` need a header row and two columns:
 
 ```
 id,label
@@ -110,8 +153,7 @@ For Meltome, `label` is a floating-point melting temperature (°C).
 
 | Config | Task | Metric |
 |---|---|---|
-| `deeploc_{mean,cov_dcN}.yaml` | Subcellular localisation (10-class) | Accuracy |
-| `meltome_{mean,cov_dcN}.yaml` | Thermostability (regression) | Spearman R |
+| `configs/scl/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml` | Subcellular localisation (10-class) | Accuracy |
+| `configs/meltome/{mean,cov_supervised,cov_unsupervised,hybrid}.yaml` | Thermostability (regression) | Spearman R |
 
-Core results: 4 pooling methods × 2 tasks × 3 seeds = 24 runs (see project description).
-dc sweep: dc ∈ {8, 16, 24, 32, 48}, 2 tasks × 3 seeds each.
+Core grid: 4 pooling methods × 2 tasks × 3 seeds = 24 runs. dc sweep: dc ∈ {8, 16, 24, 32, 48} on both tasks. Layer sweep: re-run with embeddings from different ProtX layers.

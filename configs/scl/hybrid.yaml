@@ -1,0 +1,27 @@
+# Hybrid pooling [μ ; flat(C)] on subcellular localisation.
+# Concatenates mean-pool with supervised covariance-pool. Output dim = d + dc².
+# To use a *frozen* covariance branch, set pretrained_path; otherwise the cov
+# branch is trained end-to-end with the probe.
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc_train.h5
+  test_embeddings:  data/embeddings/deeploc_test.h5
+  train_labels:     data/raw/deeploc/train_labels.csv
+  test_labels:      data/raw/deeploc/test_labels.csv
+
+pooling:
+  method: hybrid
+  d: 1024
+  dc: 32
+  # pretrained_path: models/unsup_pooler_dc32.pt   # uncomment to freeze cov branch
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 16
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

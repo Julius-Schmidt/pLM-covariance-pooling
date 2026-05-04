@@ -10,6 +10,7 @@ class MeanPooler(Pooler):
     """
 
     def __init__(self, d: int) -> None:
+        super().__init__()
         self._d = d
 
     def pool(self, X: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
