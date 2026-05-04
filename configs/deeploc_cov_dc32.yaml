@@ -1,0 +1,22 @@
+# Covariance pooling, dc=32, on DeepLoc subcellular localisation.
+# To sweep dc values: python scripts/run_experiment.py --config configs/deeploc_cov_dc32.yaml --dc 8 16 24 32 48
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc_train.h5
+  test_embeddings:  data/embeddings/deeploc_test.h5
+  train_labels:     data/raw/deeploc/train_labels.csv
+  test_labels:      data/raw/deeploc/test_labels.csv
+
+pooling:
+  method: covariance
+  d: 1024                # ProtX hidden dimension
+  dc: 32                 # Bottleneck dim; output is dc²=1024 floats
+  center: true
+  proj_cache: models/deeploc_proj_dc32.pt   # fitted once, reused across runs
+
+probe:
+  C: 1.0
+  max_iter: 1000
+
+seeds: [0, 1, 2]

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Data & models (large, tracked separately)
+data/embeddings/*.h5
+data/raw/**/*.fasta
+data/raw/**/*.csv
+data/raw/**/*.tsv
+models/*.pt
+results/*.json
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

@@ -1,0 +1,18 @@
+# Baseline: mean pooling on DeepLoc subcellular localisation (10-class).
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc_train.h5
+  test_embeddings:  data/embeddings/deeploc_test.h5
+  train_labels:     data/raw/deeploc/train_labels.csv   # columns: id, label
+  test_labels:      data/raw/deeploc/test_labels.csv
+
+pooling:
+  method: mean
+  d: 1024                # ProtX hidden dimension
+
+probe:
+  C: 1.0                 # Logistic regression regularisation
+  max_iter: 1000
+
+seeds: [0, 1, 2]

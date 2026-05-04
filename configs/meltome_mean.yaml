@@ -1,0 +1,17 @@
+# Baseline: mean pooling on Meltome thermostability regression.
+task: regression
+
+data:
+  train_embeddings: data/embeddings/meltome_train.h5
+  test_embeddings:  data/embeddings/meltome_test.h5
+  train_labels:     data/raw/meltome/train_labels.csv   # columns: id, label (float Tm)
+  test_labels:      data/raw/meltome/test_labels.csv
+
+pooling:
+  method: mean
+  d: 1024
+
+probe:
+  alpha: 1.0             # Ridge regression regularisation
+
+seeds: [0, 1, 2]

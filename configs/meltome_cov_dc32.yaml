@@ -1,0 +1,20 @@
+# Covariance pooling, dc=32, on Meltome thermostability regression.
+task: regression
+
+data:
+  train_embeddings: data/embeddings/meltome_train.h5
+  test_embeddings:  data/embeddings/meltome_test.h5
+  train_labels:     data/raw/meltome/train_labels.csv
+  test_labels:      data/raw/meltome/test_labels.csv
+
+pooling:
+  method: covariance
+  d: 1024
+  dc: 32
+  center: true
+  proj_cache: models/meltome_proj_dc32.pt
+
+probe:
+  alpha: 1.0
+
+seeds: [0, 1, 2]
