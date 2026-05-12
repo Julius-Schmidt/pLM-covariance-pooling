@@ -18,6 +18,9 @@ data/raw/**/*.tsv
 models/*.pt
 results/*.json
 
+*.h5
+*.fasta
+
 # Jupyter
 .ipynb_checkpoints/
 
