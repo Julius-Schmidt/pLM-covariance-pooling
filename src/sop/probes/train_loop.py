@@ -36,12 +36,15 @@ def evaluate(
     """Run the model over loader and return (metric, y_true, y_pred)."""
     _, metric_fn, _ = _loss_and_metric(task)
     model.eval()
+    device_type = device.split(":")[0]
+    use_amp = device_type == "cuda"
     preds: list[np.ndarray] = []
     truths: list[np.ndarray] = []
     for X, mask, y in loader:
         X = X.to(device)
         mask = mask.to(device)
-        out = model(X, mask)
+        with torch.autocast(device_type=device_type, enabled=use_amp):
+            out = model(X, mask)
         if task == "classification":
             p = out.argmax(dim=-1).cpu().numpy()
         else:
@@ -78,6 +81,10 @@ def train_probe(
     loss_fn, _, metric_key = _loss_and_metric(task)
     model.to(device)
 
+    device_type = device.split(":")[0]
+    use_amp = device_type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+
     trainable = [p for p in model.parameters() if p.requires_grad]
     opt = Adam(trainable, lr=lr, weight_decay=weight_decay)
 
@@ -94,16 +101,18 @@ def train_probe(
             mask = mask.to(device)
             y = y.to(device)
 
-            opt.zero_grad()
-            out = model(X, mask)
-            if task == "regression":
-                out = out.squeeze(-1)
-                target = y.float()
-            else:
-                target = y
-            loss = loss_fn(out, target)
-            loss.backward()
-            opt.step()
+            opt.zero_grad(set_to_none=True)
+            with torch.autocast(device_type=device_type, enabled=use_amp):
+                out = model(X, mask)
+                if task == "regression":
+                    out = out.squeeze(-1)
+                    target = y.float()
+                else:
+                    target = y
+                loss = loss_fn(out, target)
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
 
             running += float(loss.detach())
             n_batches += 1

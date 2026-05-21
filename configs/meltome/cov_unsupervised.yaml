@@ -17,7 +17,7 @@ pooling:
 probe:
   hidden_dim: 256
   dropout: 0.1
-  batch_size: 16
+  batch_size: 64
   epochs: 30
   lr: 1.0e-3
   weight_decay: 0.0

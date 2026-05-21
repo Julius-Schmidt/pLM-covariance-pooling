@@ -67,7 +67,7 @@ class CovariancePooler(Pooler):
         XL = self.proj_l(Xm)                                      # [B, L, dc]
         XR = self.proj_r(Xm)                                      # [B, L, dc]
 
-        C = torch.bmm(XL.transpose(1, 2), XR) / lengths.squeeze(-1).unsqueeze(-1)
+        C = torch.bmm(XL.transpose(1, 2), XR) / lengths.squeeze(-1).unsqueeze(-1).to(XL.dtype)
         out = C.flatten(1)                                        # [B, dc²]
         return out.squeeze(0) if single else out
 

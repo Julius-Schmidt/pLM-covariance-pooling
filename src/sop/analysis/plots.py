@@ -54,7 +54,7 @@ def efficiency_curve(df: pd.DataFrame, task: str, mean_method: str = "mean") -> 
         d = mean_rows["embedding_dim"].iloc[0]
         ax.axhline(m, color="gray", linestyle="--", label=f"{mean_method} (d={d})")
         ax.axvline(d, color="gray", linestyle=":", alpha=0.5)
-        ax.fill_between(ax.get_xlim(), m - s, m + s, color="gray", alpha=0.1)
+        ax.axhspan(m - s, m + s, color="gray", alpha=0.1)
 
     ax.set_xscale("log")
     ax.set_xlabel("embedding dim (log)")

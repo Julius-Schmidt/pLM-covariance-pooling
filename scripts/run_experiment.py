@@ -26,6 +26,7 @@ import argparse
 import csv
 import json
 import logging
+import re
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -114,6 +115,7 @@ def build_pooler(pooling_cfg: dict) -> Pooler:
 def make_loaders(
     cfg: dict,
     task: str,
+    device: str = "cpu",
 ) -> tuple[DataLoader, DataLoader, dict | None, int]:
     """Build train + test DataLoaders. Returns (train, test, label_to_index, n_classes)."""
     train_labels = load_labels(Path(cfg["data"]["train_labels"]))
@@ -130,14 +132,16 @@ def make_loaders(
     train_ds = ProteinEmbeddingDataset(cfg["data"]["train_embeddings"], train_labels)
     test_ds = ProteinEmbeddingDataset(cfg["data"]["test_embeddings"], test_labels)
 
+    pin = device.startswith("cuda")
+    batch_size = cfg["probe"].get("batch_size", 16)
     collate = partial(collate_pad, label_to_index=label_to_index)
     train_loader = DataLoader(
-        train_ds, batch_size=cfg["probe"].get("batch_size", 16),
-        shuffle=True, collate_fn=collate,
+        train_ds, batch_size=batch_size, shuffle=True,
+        collate_fn=collate, num_workers=0, pin_memory=pin,
     )
     test_loader = DataLoader(
-        test_ds, batch_size=cfg["probe"].get("batch_size", 16),
-        shuffle=False, collate_fn=collate,
+        test_ds, batch_size=batch_size, shuffle=False,
+        collate_fn=collate, num_workers=0, pin_memory=pin,
     )
     return train_loader, test_loader, label_to_index, n_classes
 
@@ -155,14 +159,14 @@ def run_one(cfg: dict, dc_override: int | None, output_dir: Path, config_stem: s
         pooling_cfg["dc"] = dc_override
         if "pretrained_path" in pooling_cfg:
             base = Path(pooling_cfg["pretrained_path"])
+            stem_clean = re.sub(r"_dc\d+$", "", base.stem)
             pooling_cfg["pretrained_path"] = str(
-                base.parent / f"{base.stem}_dc{dc_override}{base.suffix}"
+                base.parent / f"{stem_clean}_dc{dc_override}{base.suffix}"
             )
-
-    train_loader, test_loader, label_to_index, n_classes = make_loaders(cfg, task)
 
     probe_cfg = cfg.get("probe", {})
     device = probe_cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu")
+    train_loader, test_loader, label_to_index, n_classes = make_loaders(cfg, task, device)
 
     per_seed: list[dict] = []
     embedding_dim: int | None = None

@@ -136,7 +136,7 @@ class CovariancePCAPooler(Pooler):
 
         Xp = X @ self.proj.to(X.device)                          # [B, L, dc]
         C = torch.bmm(Xp.transpose(1, 2), Xp)                    # [B, dc, dc]
-        C = C / lengths.squeeze(-1).unsqueeze(-1)
+        C = C / lengths.squeeze(-1).unsqueeze(-1).to(Xp.dtype)
 
         out = C.flatten(1)                                       # [B, dc²]
         return out.squeeze(0) if single else out
