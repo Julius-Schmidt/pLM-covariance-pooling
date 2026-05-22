@@ -31,9 +31,18 @@ fi
 nvidia-smi | head -n 20
 
 # --- 1. Python env ----------------------------------------------------------
+# Ubuntu 26.04 ships Python 3.14, but PyTorch wheels lag — pin to 3.12 if
+# available, else fall back to system python3. Install with:
+#   sudo apt install -y python3.12 python3.12-venv
 log "Python venv"
+if command -v python3.12 >/dev/null; then
+    PY=python3.12
+else
+    PY=python3
+fi
+log "Using $PY ($($PY --version))"
 if [[ ! -d "$VENV_DIR" ]]; then
-    python3 -m venv "$VENV_DIR"
+    "$PY" -m venv "$VENV_DIR"
 fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
