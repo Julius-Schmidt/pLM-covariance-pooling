@@ -18,7 +18,8 @@ probe:
   hidden_dim: 256
   dropout: 0.1
   batch_size: 64
-  epochs: 30
+  epochs: 50
+  patience: 8           # early stopping: stop if no val improvement for 8 epochs
   lr: 1.0e-3
   weight_decay: 0.0
 

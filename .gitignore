@@ -16,7 +16,7 @@ data/raw/**/*.fasta
 data/raw/**/*.csv
 data/raw/**/*.tsv
 models/*.pt
-results/*.json
+results/*
 
 *.h5
 *.fasta

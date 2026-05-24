@@ -27,6 +27,9 @@ import csv
 import json
 import logging
 import re
+import subprocess
+import sys
+import time
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable
@@ -54,6 +57,37 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Run-level metadata (captured once per process)
+# ---------------------------------------------------------------------------
+
+def _run_meta() -> dict:
+    """git SHA + torch/python versions so each result can be traced back."""
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parent.parent,
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        sha = None
+    try:
+        dirty = bool(subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=Path(__file__).resolve().parent.parent,
+            stderr=subprocess.DEVNULL,
+        ).decode().strip())
+    except Exception:
+        dirty = None
+    return {
+        "git_sha": sha,
+        "git_dirty": dirty,
+        "torch_version": torch.__version__,
+        "python_version": sys.version.split()[0],
+        "device_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +158,7 @@ def make_loaders(
     test_ds = ProteinEmbeddingDataset(cfg["data"]["test_embeddings"], test_labels)
 
     use_cuda = device.startswith("cuda")
-    num_workers = 2 if use_cuda else 0
+    num_workers = 4 if use_cuda else 0
     loader_kwargs: dict[str, Any] = dict(
         collate_fn=partial(collate_pad, label_to_index=label_to_index),
         num_workers=num_workers,
@@ -153,24 +187,38 @@ def _loss_and_metric(task: str) -> tuple[nn.Module, Callable[[np.ndarray, np.nda
 
 
 @torch.no_grad()
-def evaluate(model: PoolingProbeModel, loader: DataLoader, task: str, device: str) -> float:
+def evaluate(
+    model: PoolingProbeModel, loader: DataLoader, task: str, device: str,
+) -> tuple[float, np.ndarray, np.ndarray, np.ndarray | None]:
+    """Return (metric, y_true, y_pred, y_proba).
+
+    * y_pred is class index for classification, scalar for regression.
+    * y_proba is the per-class softmax for classification, None for regression.
+    """
     _, metric_fn, _ = _loss_and_metric(task)
     use_amp = device.startswith("cuda")
     model.eval()
     preds: list[np.ndarray] = []
     truths: list[np.ndarray] = []
+    probas: list[np.ndarray] = []
     for X, mask, y in loader:
         X = X.to(device, non_blocking=True)
         mask = mask.to(device, non_blocking=True)
         with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
             out = model(X, mask)
         if task == "classification":
-            p = out.argmax(dim=-1).detach().cpu().numpy()
+            # softmax in fp32 for numerical stability across the batch
+            proba = torch.softmax(out.float(), dim=-1).detach().cpu().numpy()
+            probas.append(proba)
+            p = proba.argmax(axis=-1)
         else:
             p = out.squeeze(-1).float().detach().cpu().numpy()
         preds.append(p)
         truths.append(y.numpy())
-    return metric_fn(np.concatenate(truths), np.concatenate(preds))
+    y_true = np.concatenate(truths)
+    y_pred = np.concatenate(preds)
+    y_proba = np.concatenate(probas) if probas else None
+    return metric_fn(y_true, y_pred), y_true, y_pred, y_proba
 
 
 def train_probe(
@@ -184,7 +232,15 @@ def train_probe(
     weight_decay: float,
     device: str,
     log_fn: Callable[[str], None],
+    patience: int | None = None,
 ) -> dict:
+    """Train until convergence.
+
+    * If `patience` is set, training stops early when the val metric hasn't
+      improved for `patience` consecutive epochs. `epochs` then acts as a
+      max-epoch ceiling.
+    * If `patience` is None, training runs the full `epochs` count.
+    """
     loss_fn, _, metric_key = _loss_and_metric(task)
     model.to(device)
 
@@ -198,8 +254,15 @@ def train_probe(
     history: list[dict] = []
     best_metric = -float("inf")
     best_epoch = -1
+    best_y_true: np.ndarray | None = None
+    best_y_pred: np.ndarray | None = None
+    best_y_proba: np.ndarray | None = None
+    best_pooler_state: dict | None = None
+    epochs_since_improvement = 0
+    stopped_early = False
 
     for epoch in range(epochs):
+        t0 = time.perf_counter()
         model.train()
         running = 0.0
         n_batches = 0
@@ -223,23 +286,67 @@ def train_probe(
 
             running += float(loss.detach())
             n_batches += 1
+        t_train = time.perf_counter() - t0
 
         train_loss = running / max(n_batches, 1)
         val_metric = float("nan")
+        t_val = 0.0
         if val_loader is not None:
-            val_metric = evaluate(model, val_loader, task, device)
+            t1 = time.perf_counter()
+            val_metric, y_true, y_pred, y_proba = evaluate(model, val_loader, task, device)
+            t_val = time.perf_counter() - t1
             if val_metric > best_metric:
                 best_metric = val_metric
                 best_epoch = epoch
+                best_y_true = y_true
+                best_y_pred = y_pred
+                best_y_proba = y_proba
+                # Snapshot pooler weights at the best epoch (CPU copy so we
+                # don't pin GPU memory; ignored at save time for MeanPooler
+                # which has no parameters).
+                best_pooler_state = {
+                    k: v.detach().cpu().clone()
+                    for k, v in model.pooler.state_dict().items()
+                }
+                epochs_since_improvement = 0
+            else:
+                epochs_since_improvement += 1
 
-        history.append({"epoch": epoch, "train_loss": train_loss, metric_key: val_metric})
-        log_fn(f"epoch {epoch:3d}  train_loss={train_loss:.4f}  val_{metric_key}={val_metric:.4f}")
+        history.append({
+            "epoch": epoch,
+            "train_loss": train_loss,
+            metric_key: val_metric,
+            "epoch_time_s": round(t_train + t_val, 3),
+            "train_time_s": round(t_train, 3),
+            "val_time_s": round(t_val, 3),
+        })
+        log_fn(
+            f"epoch {epoch:3d}  train_loss={train_loss:.4f}  "
+            f"val_{metric_key}={val_metric:.4f}  "
+            f"time={t_train + t_val:.1f}s (train={t_train:.1f}, val={t_val:.1f})  "
+            f"no_improve={epochs_since_improvement}"
+        )
+
+        if patience is not None and epochs_since_improvement >= patience:
+            log_fn(
+                f"early stopping at epoch {epoch} — no improvement for "
+                f"{patience} epochs (best was epoch {best_epoch}, "
+                f"val_{metric_key}={best_metric:.4f})"
+            )
+            stopped_early = True
+            break
 
     return {
         "best_metric": best_metric,
         "best_epoch": best_epoch,
         "metric_key": metric_key,
         "history": history,
+        "best_y_true": best_y_true,
+        "best_y_pred": best_y_pred,
+        "best_y_proba": best_y_proba,
+        "best_pooler_state": best_pooler_state,
+        "stopped_early": stopped_early,
+        "epochs_run": len(history),
     }
 
 
@@ -263,7 +370,7 @@ def run_one(cfg: dict, dc_override: int | None, output_dir: Path, config_stem: s
 
     probe_cfg = cfg.get("probe", {})
     device = probe_cfg.get("device", "cuda" if torch.cuda.is_available() else "cpu")
-    train_loader, test_loader, _, n_classes = make_loaders(cfg, task, device)
+    train_loader, test_loader, label_to_index, n_classes = make_loaders(cfg, task, device)
 
     per_seed: list[dict] = []
     embedding_dim: int | None = None
@@ -296,11 +403,30 @@ def run_one(cfg: dict, dc_override: int | None, output_dir: Path, config_stem: s
             weight_decay=probe_cfg.get("weight_decay", 0.0),
             device=device,
             log_fn=lambda s: log.info("    " + s),
+            patience=probe_cfg.get("patience"),  # None = no early stopping
         )
+        # Save pooler weights snapshot to a sibling .pt file (skip empty
+        # state_dicts, e.g. MeanPooler).
+        pooler_weights_path: str | None = None
+        if result["best_pooler_state"]:
+            weights_dir = output_dir / "pooler_weights"
+            weights_dir.mkdir(parents=True, exist_ok=True)
+            tag_dc = f"_dc{pooling_cfg.get('dc')}" if pooling_cfg.get("dc") else ""
+            weights_file = weights_dir / f"{config_stem}_{pooling_cfg['method']}{tag_dc}_seed{seed}.pt"
+            torch.save(result["best_pooler_state"], weights_file)
+            pooler_weights_path = str(weights_file)
+
         per_seed.append({
             "seed": seed,
             result["metric_key"]: result["best_metric"],
             "best_epoch": result["best_epoch"],
+            "epochs_run": result["epochs_run"],
+            "stopped_early": result["stopped_early"],
+            "history": result["history"],
+            "y_true": result["best_y_true"].tolist() if result["best_y_true"] is not None else None,
+            "y_pred": result["best_y_pred"].tolist() if result["best_y_pred"] is not None else None,
+            "y_proba": result["best_y_proba"].tolist() if result["best_y_proba"] is not None else None,
+            "pooler_weights_path": pooler_weights_path,
         })
         log.info("  seed=%d  best_%s=%.4f", seed, result["metric_key"], result["best_metric"])
 
@@ -317,6 +443,8 @@ def run_one(cfg: dict, dc_override: int | None, output_dir: Path, config_stem: s
         "task": task,
         f"{metric_key}_mean": mean,
         f"{metric_key}_std": std,
+        "label_to_index": label_to_index,  # None for regression; class-name → int for classification
+        "meta": _run_meta(),
         "per_seed": per_seed,
     }
 
@@ -340,10 +468,13 @@ def main() -> None:
         cfg: dict[str, Any] = yaml.safe_load(fh)
 
     dc_values: list[int | None] = args.dc if args.dc else [None]
-    summaries = [run_one(cfg, dc, args.output_dir, args.config.stem) for dc in dc_values]
+    # Prefix with the parent directory (e.g. "scl" / "meltome") so SCL and
+    # meltome runs of the same method don't overwrite each other's JSON.
+    stem = f"{args.config.parent.name}_{args.config.stem}"
+    summaries = [run_one(cfg, dc, args.output_dir, stem) for dc in dc_values]
 
     if len(summaries) > 1:
-        sweep_path = args.output_dir / f"{args.config.stem}_sweep.json"
+        sweep_path = args.output_dir / f"{stem}_sweep.json"
         with open(sweep_path, "w") as fh:
             json.dump(summaries, fh, indent=2)
         log.info("Sweep results → %s", sweep_path)
