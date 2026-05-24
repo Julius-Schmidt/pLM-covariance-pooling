@@ -158,7 +158,9 @@ def make_loaders(
     test_ds = ProteinEmbeddingDataset(cfg["data"]["test_embeddings"], test_labels)
 
     use_cuda = device.startswith("cuda")
-    num_workers = 4 if use_cuda else 0
+    # 2 workers is the sweet spot on g4dn.xlarge (16 GB RAM). Going to 4 caused
+    # an OOM in May 2026 due to HDF5 page cache + prefetch shared-memory growth.
+    num_workers = 2 if use_cuda else 0
     loader_kwargs: dict[str, Any] = dict(
         collate_fn=partial(collate_pad, label_to_index=label_to_index),
         num_workers=num_workers,
