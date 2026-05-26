@@ -39,7 +39,7 @@ FILE_MAP = {
 }
 
 LABELS = {
-    "mean":             "Mean\n(baseline)",
+    "mean":             "Mean",
     "cov_supervised":   "Cov\nsupervised",
     "cov_unsupervised": "Cov\nunsupervised",
     "cov_pca":          "Cov\nPCA",
@@ -144,11 +144,6 @@ def fig1_main_results(datasets: dict, out: Path):
                 fmt="none", color="black", capsize=5, capthick=1.2,
                 elinewidth=1.2, zorder=4)
 
-    # Baseline reference line
-    baseline = means[0]
-    ax.axhline(baseline, color=COLORS["mean"], linewidth=1.0,
-               linestyle="--", alpha=0.6, zorder=2)
-
     # Value labels on bars
     for xi, (m, s) in enumerate(zip(means, stds)):
         ax.text(xi, m + s + 0.25, f"{m:.1f}%",
@@ -162,12 +157,6 @@ def fig1_main_results(datasets: dict, out: Path):
     ax.set_axisbelow(True)
     ax.set_title("Subcellular localisation accuracy  ·  DeepLoc  ·  dc = 32",
                  fontsize=12, pad=10)
-
-    # Embedding-size annotation under hybrid bar
-    ax.text(4, 77.2, "2048-dim", ha="center", fontsize=8.5,
-            color="#5F5E5A", style="italic")
-    ax.text(0, 77.2, "1024-dim", ha="center", fontsize=8.5,
-            color="#5F5E5A", style="italic")
 
     fig.tight_layout()
     path = out / "fig1_main_results.png"
@@ -183,7 +172,7 @@ def fig1_main_results(datasets: dict, out: Path):
 def fig2_training_curves(datasets: dict, out: Path):
     show = ["mean", "cov_supervised", "cov_unsupervised", "hybrid"]
     nice = {
-        "mean":             "Mean (baseline)",
+        "mean":             "Mean",
         "cov_supervised":   "Cov supervised",
         "cov_unsupervised": "Cov unsupervised",
         "hybrid":           "Hybrid [µ; C]",
