@@ -1,107 +1,128 @@
 """
-plot_results.py  –  SCL pooling benchmark figures
----------------------------------------------------
-Generates three publication-ready PNG figures from the DeepLoc
-subcellular-localization benchmark results (dc=32, ProtX backbone).
+plot_results.py  –  DeepLoc + Meltome pooling benchmark figures
+----------------------------------------------------------------
+Generates five publication-ready PNG figures from the DeepLoc
+subcellular-localisation and Meltome thermostability results.
 
 Usage:
     python plot_results.py [--data DIR] [--out DIR]
 
-    --data  folder containing the five JSON result files (default: same folder as script)
+    --data  folder containing the JSON result files (default: same folder as script)
     --out   folder where PNGs are saved               (default: same folder as script)
 
 Figures produced:
-    fig1_main_results.png     – bar chart, all 5 methods, error bars (±1 std, 3 seeds)
-    fig2_training_curves.png  – validation accuracy over epochs, mean ± std shaded
-    fig3_per_class.png        – per-class accuracy, mean pooling vs cov supervised
+    DeepLoc
+        fig_deeploc_bar.png       – bar chart, accuracy ± std (3 seeds)
+        fig_deeploc_training.png  – validation accuracy over epochs, mean ± std
+        fig_deeploc_per_class.png – per-class accuracy, mean vs cov supervised
+
+    Meltome
+        fig_meltome_bar.png       – bar chart, Spearman R ± std (3 seeds)
+        fig_meltome_training.png  – validation Spearman R over epochs, mean ± std
 """
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
 from sklearn.metrics import confusion_matrix
 
 # ---------------------------------------------------------------------------
-# Configuration
+# File map  –  edit here when new result files arrive
 # ---------------------------------------------------------------------------
 
-FILE_MAP = {
+DEEPLOC_FILES = {
     "mean":             "scl_mean_mean.json",
     "cov_supervised":   "scl_cov_supervised_cov_supervised_dc32.json",
     "cov_unsupervised": "scl_cov_unsupervised_cov_unsupervised_dc32.json",
-    "cov_pca":          "scl_cov_pca_cov_pca_dc32.json",
     "hybrid":           "scl_hybrid_hybrid_dc32.json",
 }
+
+MELTOME_FILES = {
+    "mean":             "meltome_mean_mean.json",
+    "cov_supervised":   "meltome_cov_supervised_cov_supervised_dc32.json",
+    "cov_unsupervised": "meltome_cov_unsupervised_cov_unsupervised_dc32.json",
+}
+
+# ---------------------------------------------------------------------------
+# Display config
+# ---------------------------------------------------------------------------
 
 LABELS = {
     "mean":             "Mean",
     "cov_supervised":   "Cov\nsupervised",
     "cov_unsupervised": "Cov\nunsupervised",
-    "cov_pca":          "Cov\nPCA",
     "hybrid":           "Hybrid\n[µ; C]",
 }
+
+LABELS_FLAT = {k: v.replace("\n", " ") for k, v in LABELS.items()}
 
 COLORS = {
     "mean":             "#888780",
     "cov_supervised":   "#378ADD",
     "cov_unsupervised": "#85B7EB",
-    "cov_pca":          "#D3D1C7",
     "hybrid":           "#1D9E75",
 }
 
+EDGE_COLORS = {
+    "mean":             "#5F5E5A",
+    "cov_supervised":   "#185FA5",
+    "cov_unsupervised": "#378ADD",
+    "hybrid":           "#0F6E56",
+}
+
+DASHES = {
+    "mean":             [],
+    "cov_supervised":   [],
+    "cov_unsupervised": [4, 2],
+    "hybrid":           [],
+}
+
 CLASS_NAMES = [
-    "Cell membrane",
-    "Cytoplasm",
-    "ER",
-    "Extracellular",
-    "Golgi",
-    "Lysosome/Vac.",
-    "Mitochondrion",
-    "Nucleus",
-    "Peroxisome",
-    "Plastid",
+    "Cell membrane", "Cytoplasm", "ER", "Extracellular",
+    "Golgi", "Lysosome/Vac.", "Mitochondrion", "Nucleus",
+    "Peroxisome", "Plastid",
 ]
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def load(data_dir: Path, key: str) -> dict:
-    path = data_dir / FILE_MAP[key]
-    with open(path) as f:
-        return json.load(f)
+def load(data_dir: Path, file_map: dict) -> dict:
+    return {k: json.load(open(data_dir / v)) for k, v in file_map.items()}
 
 
-def seed_accuracies(data: dict) -> np.ndarray:
-    return np.array([s["accuracy"] for s in data["per_seed"]])
+def metric_key(data: dict) -> str:
+    return "spearman_r" if data["task"] == "regression" else "accuracy"
 
 
-def avg_history(data: dict, field: str = "accuracy") -> tuple[np.ndarray, np.ndarray]:
-    """Return (mean_curve, std_curve) averaged over seeds, truncated to shortest."""
-    curves = [np.array([ep[field] for ep in s["history"]]) for s in data["per_seed"]]
+def seed_values(data: dict) -> np.ndarray:
+    k = metric_key(data)
+    return np.array([s[k] for s in data["per_seed"]])
+
+
+def avg_history(data: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Mean ± std validation curves, truncated to shortest seed. Returns raw values."""
+    k = metric_key(data)
+    curves = [np.array([ep[k] for ep in s["history"]]) for s in data["per_seed"]]
     min_len = min(len(c) for c in curves)
-    mat = np.stack([c[:min_len] for c in curves])          # (n_seeds, epochs)
-    return mat.mean(axis=0) * 100, mat.std(axis=0) * 100
+    mat = np.stack([c[:min_len] for c in curves])
+    return mat.mean(axis=0), mat.std(axis=0)
 
 
 def pooled_predictions(data: dict) -> tuple[np.ndarray, np.ndarray]:
-    """Concatenate y_true / y_pred across all seeds."""
     y_true = np.concatenate([s["y_true"] for s in data["per_seed"]])
     y_pred = np.concatenate([s["y_pred"] for s in data["per_seed"]])
     return y_true, y_pred
 
 
-def per_class_accuracy(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int = 10) -> np.ndarray:
+def per_class_accuracy(y_true, y_pred, n_classes=10) -> np.ndarray:
     cm = confusion_matrix(y_true, y_pred, labels=list(range(n_classes)))
     with np.errstate(divide="ignore", invalid="ignore"):
         acc = np.where(cm.sum(axis=1) > 0,
-                       cm.diagonal() / cm.sum(axis=1),
-                       np.nan)
+                       cm.diagonal() / cm.sum(axis=1), np.nan)
     return acc * 100
 
 
@@ -110,116 +131,108 @@ def per_class_accuracy(y_true: np.ndarray, y_pred: np.ndarray, n_classes: int = 
 # ---------------------------------------------------------------------------
 
 plt.rcParams.update({
-    "font.family":        "sans-serif",
-    "font.size":          11,
-    "axes.spines.top":    False,
-    "axes.spines.right":  False,
-    "axes.linewidth":     0.8,
-    "xtick.major.size":   0,
-    "ytick.major.size":   3,
-    "figure.dpi":         150,
+    "font.family":       "sans-serif",
+    "font.size":         11,
+    "axes.spines.top":   False,
+    "axes.spines.right": False,
+    "axes.linewidth":    0.8,
+    "xtick.major.size":  0,
+    "ytick.major.size":  3,
+    "figure.dpi":        150,
 })
 
 
-# ---------------------------------------------------------------------------
-# Figure 1 – Main results bar chart
-# ---------------------------------------------------------------------------
-
-def fig1_main_results(datasets: dict, out: Path):
-    methods = list(FILE_MAP.keys())
-    means = np.array([seed_accuracies(datasets[m]).mean() for m in methods]) * 100
-    stds  = np.array([seed_accuracies(datasets[m]).std()  for m in methods]) * 100
-    bar_colors = [COLORS[m] for m in methods]
+def _bar_fig(datasets, ylabel, ylim, metric_fmt, title, scale=1.0, ytick_fmt=None):
+    methods = list(datasets.keys())
+    vals = np.array([seed_values(datasets[m]).mean() for m in methods]) * scale
+    stds = np.array([seed_values(datasets[m]).std()  for m in methods]) * scale
     x = np.arange(len(methods))
 
-    fig, ax = plt.subplots(figsize=(7.5, 4.2))
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
 
-    bars = ax.bar(x, means, width=0.55,
-                  color=bar_colors,
-                  edgecolor=[c for c in ["#5F5E5A","#185FA5","#378ADD","#888780","#0F6E56"]],
-                  linewidth=0.8,
-                  zorder=3)
+    ax.bar(x, vals, width=0.55,
+           color=[COLORS[m] for m in methods],
+           edgecolor=[EDGE_COLORS[m] for m in methods],
+           linewidth=0.8, zorder=3)
 
-    ax.errorbar(x, means, yerr=stds,
-                fmt="none", color="black", capsize=5, capthick=1.2,
-                elinewidth=1.2, zorder=4)
+    ax.errorbar(x, vals, yerr=stds,
+                fmt="none", color="black", capsize=5,
+                capthick=1.2, elinewidth=1.2, zorder=4)
 
-    # Value labels on bars
-    for xi, (m, s) in enumerate(zip(means, stds)):
-        ax.text(xi, m + s + 0.25, f"{m:.1f}%",
-                ha="center", va="bottom", fontsize=9.5, color="#2C2C2A")
+    for xi, (v, s) in enumerate(zip(vals, stds)):
+        ax.text(xi, v + s + (ylim[1] - ylim[0]) * 0.012,
+                metric_fmt.format(v),
+                ha="center", va="bottom", fontsize=9.5)
 
     ax.set_xticks(x)
     ax.set_xticklabels([LABELS[m] for m in methods], fontsize=10)
-    ax.set_ylabel("Test accuracy (%)", fontsize=11)
-    ax.set_ylim(77, 88)
+    ax.set_ylabel(ylabel, fontsize=11)
+    ax.set_ylim(*ylim)
     ax.yaxis.grid(True, color="#E8E8E8", linewidth=0.7, zorder=0)
     ax.set_axisbelow(True)
-    ax.set_title("Subcellular localisation accuracy  ·  DeepLoc  ·  dc = 32",
-                 fontsize=12, pad=10)
+    ax.set_title(title, fontsize=12, pad=10)
+    if ytick_fmt:
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(ytick_fmt))
 
     fig.tight_layout()
-    path = out / "fig1_main_results.png"
-    fig.savefig(path, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  saved {path}")
+    return fig
 
 
-# ---------------------------------------------------------------------------
-# Figure 2 – Training curves
-# ---------------------------------------------------------------------------
-
-def fig2_training_curves(datasets: dict, out: Path):
-    show = ["mean", "cov_supervised", "cov_unsupervised", "hybrid"]
-    nice = {
-        "mean":             "Mean",
-        "cov_supervised":   "Cov supervised",
-        "cov_unsupervised": "Cov unsupervised",
-        "hybrid":           "Hybrid [µ; C]",
-    }
-    dashes = {
-        "mean":             (None, None),
-        "cov_supervised":   (None, None),
-        "cov_unsupervised": (4, 2),
-        "hybrid":           (None, None),
-    }
-
-    fig, ax = plt.subplots(figsize=(7.5, 4.2))
-
-    # Truncate all methods to the same number of epochs (shortest method)
-    curves = {m: avg_history(datasets[m]) for m in show}
+def _curve_fig(datasets, ylabel, title, scale=1.0):
+    curves = {m: avg_history(datasets[m]) for m in datasets}
     min_epochs = min(len(mu) for mu, _ in curves.values())
 
-    for m in show:
-        mu, sd = curves[m]
-        mu, sd = mu[:min_epochs], sd[:min_epochs]
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+
+    for m, (mu, sd) in curves.items():
+        mu, sd = mu[:min_epochs] * scale, sd[:min_epochs] * scale
         ep = np.arange(1, min_epochs + 1)
-        ls = "--" if dashes[m][0] else "-"
+        ls = "--" if DASHES[m] else "-"
         ax.plot(ep, mu, color=COLORS[m], linewidth=2.0,
-                linestyle=ls, label=nice[m], zorder=3)
+                linestyle=ls, label=LABELS_FLAT[m], zorder=3)
         ax.fill_between(ep, mu - sd, mu + sd,
                         color=COLORS[m], alpha=0.15, zorder=2)
 
     ax.set_xlabel("Epoch", fontsize=11)
-    ax.set_ylabel("Validation accuracy (%)", fontsize=11)
-    ax.set_title("Training dynamics  ·  mean ± 1 std across 3 seeds",
-                 fontsize=12, pad=10)
+    ax.set_ylabel(ylabel, fontsize=11)
+    ax.set_title(title, fontsize=12, pad=10)
     ax.yaxis.grid(True, color="#E8E8E8", linewidth=0.7, zorder=0)
     ax.set_axisbelow(True)
     ax.legend(fontsize=9.5, frameon=False, loc="lower right")
 
     fig.tight_layout()
-    path = out / "fig2_training_curves.png"
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# DeepLoc figures
+# ---------------------------------------------------------------------------
+
+def fig_deeploc_bar(deeploc: dict, out: Path):
+    fig = _bar_fig(deeploc,
+                   ylabel="Accuracy (%)",
+                   ylim=(77, 88),
+                   metric_fmt="{:.1f}%",
+                   title="Subcellular localisation  ·  DeepLoc  ·  dc = 32",
+                   scale=100)
+    path = out / "fig_deeploc_bar.png"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     print(f"  saved {path}")
 
 
-# ---------------------------------------------------------------------------
-# Figure 3 – Per-class accuracy
-# ---------------------------------------------------------------------------
+def fig_deeploc_training(deeploc: dict, out: Path):
+    fig = _curve_fig(deeploc,
+                     ylabel="Validation accuracy (%)",
+                     title="DeepLoc training dynamics  ·  mean ± 1 std, 3 seeds",
+                     scale=100)
+    path = out / "fig_deeploc_training.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {path}")
 
-def fig3_per_class(datasets: dict, out: Path):
+
+def fig_deeploc_per_class(deeploc: dict, out: Path):
     compare = ["mean", "cov_supervised"]
     n = len(CLASS_NAMES)
     x = np.arange(n)
@@ -228,29 +241,27 @@ def fig3_per_class(datasets: dict, out: Path):
     fig, ax = plt.subplots(figsize=(9.5, 4.5))
 
     for i, m in enumerate(compare):
-        yt, yp = pooled_predictions(datasets[m])
+        yt, yp = pooled_predictions(deeploc[m])
         acc = per_class_accuracy(yt, yp)
         offset = (i - 0.5) * width
-        bars = ax.bar(x + offset, acc, width,
-                      color=COLORS[m], alpha=0.9,
-                      label=LABELS[m].replace("\n", " "),
-                      edgecolor="white", linewidth=0.5, zorder=3)
+        ax.bar(x + offset, acc, width,
+               color=COLORS[m], alpha=0.9,
+               label=LABELS_FLAT[m],
+               edgecolor="white", linewidth=0.5, zorder=3)
 
-    # Improvement arrows / difference line
-    yt_m, yp_m = pooled_predictions(datasets["mean"])
-    yt_s, yp_s = pooled_predictions(datasets["cov_supervised"])
-    acc_mean = per_class_accuracy(yt_m, yp_m)
-    acc_sup  = per_class_accuracy(yt_s, yp_s)
-    delta = acc_sup - acc_mean
+    yt_m, yp_m = pooled_predictions(deeploc["mean"])
+    yt_s, yp_s = pooled_predictions(deeploc["cov_supervised"])
+    delta = per_class_accuracy(yt_s, yp_s) - per_class_accuracy(yt_m, yp_m)
 
     ax2 = ax.twinx()
     ax2.plot(x, delta, "o-", color="#D85A30", linewidth=1.4,
-             markersize=5, zorder=5, label="Δ (supervised − mean)")
+             markersize=5, zorder=5, label="Δ (cov supervised − mean)")
     ax2.axhline(0, color="#D85A30", linewidth=0.7, linestyle="--", alpha=0.5)
     ax2.set_ylabel("Δ accuracy (pp)", fontsize=10, color="#D85A30")
     ax2.tick_params(axis="y", colors="#D85A30", labelsize=9)
     ax2.spines["right"].set_color("#D85A30")
     ax2.spines["right"].set_linewidth(0.7)
+    ax2.spines["top"].set_visible(False)
 
     ax.set_xticks(x)
     ax.set_xticklabels(CLASS_NAMES, rotation=35, ha="right", fontsize=9.5)
@@ -258,10 +269,9 @@ def fig3_per_class(datasets: dict, out: Path):
     ax.set_ylim(0, 105)
     ax.yaxis.grid(True, color="#E8E8E8", linewidth=0.7, zorder=0)
     ax.set_axisbelow(True)
-    ax.set_title("Per-class accuracy  ·  mean vs cov supervised  ·  pooled across 3 seeds",
+    ax.set_title("Per-class accuracy  ·  DeepLoc  ·  pooled across 3 seeds",
                  fontsize=12, pad=10)
 
-    # Combined legend – placed below the plot
     handles1, labels1 = ax.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
     ax.legend(handles1 + handles2, labels1 + labels2,
@@ -270,7 +280,34 @@ def fig3_per_class(datasets: dict, out: Path):
 
     fig.tight_layout()
     fig.subplots_adjust(bottom=0.28)
-    path = out / "fig3_per_class.png"
+    path = out / "fig_deeploc_per_class.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {path}")
+
+
+# ---------------------------------------------------------------------------
+# Meltome figures
+# ---------------------------------------------------------------------------
+
+def fig_meltome_bar(meltome: dict, out: Path):
+    fig = _bar_fig(meltome,
+                   ylabel="Spearman R",
+                   ylim=(0.60, 0.73),
+                   metric_fmt="{:.3f}",
+                   title="Thermostability  ·  Meltome  ·  dc = 32",
+                   ytick_fmt=lambda v, _: f"{v:.2f}")
+    path = out / "fig_meltome_bar.png"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {path}")
+
+
+def fig_meltome_training(meltome: dict, out: Path):
+    fig = _curve_fig(meltome,
+                     ylabel="Validation Spearman R",
+                     title="Meltome training dynamics  ·  mean ± 1 std, 3 seeds")
+    path = out / "fig_meltome_training.png"
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     print(f"  saved {path}")
@@ -293,14 +330,21 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("Loading results...")
-    datasets = {k: load(data_dir, k) for k in FILE_MAP}
+    deeploc = load(data_dir, DEEPLOC_FILES)
+    meltome = load(data_dir, MELTOME_FILES)
 
     print("Generating figures...")
-    fig1_main_results(datasets, out_dir)
-    fig2_training_curves(datasets, out_dir)
-    fig3_per_class(datasets, out_dir)
 
-    print("\nDone. Three figures saved to:", out_dir)
+    # --- DeepLoc ---
+    fig_deeploc_bar(deeploc, out_dir)
+    fig_deeploc_training(deeploc, out_dir)
+    fig_deeploc_per_class(deeploc, out_dir)
+
+    # --- Meltome ---
+    fig_meltome_bar(meltome, out_dir)
+    fig_meltome_training(meltome, out_dir)
+
+    print("\nDone. Five figures saved to:", out_dir)
 
 
 if __name__ == "__main__":
