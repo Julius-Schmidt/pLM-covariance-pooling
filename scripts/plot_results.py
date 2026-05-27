@@ -37,6 +37,7 @@ DEEPLOC_FILES = {
     "mean":             "scl_mean_mean.json",
     "cov_supervised":   "scl_cov_supervised_cov_supervised_dc32.json",
     "cov_unsupervised": "scl_cov_unsupervised_cov_unsupervised_dc32.json",
+    "cov_pca":          "scl_cov_pca_cov_pca_dc32.json",
     "hybrid":           "scl_hybrid_hybrid_dc32.json",
 }
 
@@ -44,6 +45,7 @@ MELTOME_FILES = {
     "mean":             "meltome_mean_mean.json",
     "cov_supervised":   "meltome_cov_supervised_cov_supervised_dc32.json",
     "cov_unsupervised": "meltome_cov_unsupervised_cov_unsupervised_dc32.json",
+    "cov_pca":          "meltome_cov_pca_cov_pca_dc32.json",
 }
 
 # ---------------------------------------------------------------------------
@@ -54,6 +56,7 @@ LABELS = {
     "mean":             "Mean",
     "cov_supervised":   "Cov\nsupervised",
     "cov_unsupervised": "Cov\nunsupervised",
+    "cov_pca":          "Cov\nPCA",
     "hybrid":           "Hybrid\n[µ; C]",
 }
 
@@ -63,6 +66,7 @@ COLORS = {
     "mean":             "#888780",
     "cov_supervised":   "#378ADD",
     "cov_unsupervised": "#85B7EB",
+    "cov_pca":          "#D3D1C7",
     "hybrid":           "#1D9E75",
 }
 
@@ -70,6 +74,7 @@ EDGE_COLORS = {
     "mean":             "#5F5E5A",
     "cov_supervised":   "#185FA5",
     "cov_unsupervised": "#378ADD",
+    "cov_pca":          "#888780",
     "hybrid":           "#0F6E56",
 }
 
@@ -77,6 +82,7 @@ DASHES = {
     "mean":             [],
     "cov_supervised":   [],
     "cov_unsupervised": [4, 2],
+    "cov_pca":          [2, 2],
     "hybrid":           [],
 }
 
