@@ -1,0 +1,26 @@
+# Matrix-power-normalised covariance pooling on Meltome thermostability.
+# Supervised covariance C → C^{1/2} (iSQRT-COV, Newton–Schulz) before the probe.
+# Sweep dc with: --dc 8 16 24 32 48
+task: regression
+
+data:
+  train_embeddings: data/embeddings/meltome_train.h5
+  test_embeddings:  data/embeddings/meltome_test.h5
+  train_labels:     data/raw/meltome/train_labels.csv
+  test_labels:      data/raw/meltome/test_labels.csv
+
+pooling:
+  method: cov_supervised
+  d: 1024
+  dc: 32
+  power_norm: true       # apply C → C^{1/2} (matrix square root)
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

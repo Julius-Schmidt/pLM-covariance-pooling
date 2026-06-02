@@ -1,0 +1,27 @@
+# Full stack (LA + covariance + matrix-power) on subcellular localisation:
+#   ProtX → light-attention-weighted residues → C → C^{1/2} → vec → FNN.
+# All three extensions composed (docs §5.1). Sweep dc with: --dc 8 16 24 32 48
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc_train.h5
+  test_embeddings:  data/embeddings/deeploc_test.h5
+  train_labels:     data/raw/deeploc/train_labels.csv
+  test_labels:      data/raw/deeploc/test_labels.csv
+
+pooling:
+  method: attention_cov
+  d: 1024
+  dc: 32
+  kernel_size: 9
+  power_norm: true       # C → C^{1/2} on top of the attention-weighted cov
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

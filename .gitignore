@@ -16,10 +16,16 @@ data/raw/**/*.fasta
 data/raw/**/*.csv
 data/raw/**/*.tsv
 models/*.pt
+
+# Results: track only the lightweight visualisation outputs (plots +
+# summary_table.tsv). Raw per-run JSON and pooler .pt weights are large
+# (100+ MB) and fully regenerable, so keep them out of git.
 results/*
+!results/visualization/
 
 *.h5
 *.fasta
+*.zip
 
 # Jupyter
 .ipynb_checkpoints/
@@ -41,3 +47,6 @@ htmlcov/
 #data
 data/
 .claude
+
+#runs
+runs/

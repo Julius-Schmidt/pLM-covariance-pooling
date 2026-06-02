@@ -41,10 +41,12 @@ import yaml
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 
+from sop.pooling.attention_covariance import AttentionCovariancePooler
 from sop.pooling.base import Pooler
 from sop.pooling.covariance import CovariancePooler
 from sop.pooling.covariance_pca import CovariancePCAPooler
 from sop.pooling.hybrid import HybridPooler
+from sop.pooling.light_attention import LightAttentionPooler
 from sop.pooling.mean import MeanPooler
 from sop.probes.dataset import ProteinEmbeddingDataset, collate_pad
 from sop.probes.fnn import ProbeFNN
@@ -107,10 +109,13 @@ def build_pooler(pooling_cfg: dict) -> Pooler:
     method = pooling_cfg["method"]
     d = pooling_cfg["d"]
 
+    # Matrix-power (iSQRT-COV) normalisation toggle, shared by the cov methods.
+    power_norm = pooling_cfg.get("power_norm", False)
+
     if method == "mean":
         return MeanPooler(d)
     if method == "cov_supervised":
-        return CovariancePooler(d, pooling_cfg["dc"])
+        return CovariancePooler(d, pooling_cfg["dc"], power_norm=power_norm)
     if method == "cov_unsupervised":
         ckpt = Path(pooling_cfg["pretrained_path"])
         if not ckpt.exists():
@@ -126,17 +131,34 @@ def build_pooler(pooling_cfg: dict) -> Pooler:
                 f"PCA covariance checkpoint not found: {ckpt}. "
                 "Run scripts/fit_pca_pool.py first."
             )
-        return CovariancePCAPooler.from_pretrained(ckpt)
+        pooler = CovariancePCAPooler.from_pretrained(ckpt)
+        if power_norm:
+            pooler.set_power_norm(True)
+        return pooler
     if method == "hybrid":
         dc = pooling_cfg["dc"]
         cov = CovariancePooler(d, dc)
         if "pretrained_path" in pooling_cfg:
             cov = CovariancePooler.from_pretrained(pooling_cfg["pretrained_path"])
         return HybridPooler(d, cov)
+    if method == "light_attention":
+        return LightAttentionPooler(
+            d,
+            kernel_size=pooling_cfg.get("kernel_size", 9),
+            conv_dropout=pooling_cfg.get("conv_dropout", 0.25),
+        )
+    if method == "attention_cov":
+        return AttentionCovariancePooler(
+            d,
+            pooling_cfg["dc"],
+            power_norm=power_norm,
+            kernel_size=pooling_cfg.get("kernel_size", 9),
+            conv_dropout=pooling_cfg.get("conv_dropout", 0.0),
+        )
 
     raise ValueError(
-        f"Unknown pooling method '{method}'. "
-        "Choose mean | cov_supervised | cov_unsupervised | cov_pca | hybrid."
+        f"Unknown pooling method '{method}'. Choose mean | cov_supervised | "
+        "cov_unsupervised | cov_pca | hybrid | light_attention | attention_cov."
     )
 
 
@@ -441,6 +463,7 @@ def run_one(cfg: dict, dc_override: int | None, output_dir: Path, config_stem: s
         "config": config_stem,
         "method": pooling_cfg["method"],
         "dc": pooling_cfg.get("dc"),
+        "power_norm": pooling_cfg.get("power_norm", False),
         "embedding_dim": embedding_dim,
         "task": task,
         f"{metric_key}_mean": mean,

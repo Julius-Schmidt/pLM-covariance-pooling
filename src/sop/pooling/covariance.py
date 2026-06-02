@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from .base import Pooler
+from .matrix_power import isqrt_cov
 
 
 class CovariancePooler(Pooler):
@@ -31,15 +32,20 @@ class CovariancePooler(Pooler):
     PCA special case (where L = R and C is symmetric / PSD).
     """
 
-    def __init__(self, d: int, dc: int) -> None:
+    def __init__(self, d: int, dc: int, power_norm: bool = False) -> None:
         """
         Args:
             d:  Input embedding dimension (e.g. 1024 for ProtX).
             dc: Bottleneck dimension. Output is dc² floats.
+            power_norm: If True, apply matrix square-root normalisation
+                ``C -> C^{1/2}`` (iSQRT-COV) before flattening. Since L, R are
+                independent, C is asymmetric and its symmetric part is used
+                (see ``matrix_power.isqrt_cov``).
         """
         super().__init__()
         self._d = d
         self._dc = dc
+        self._power_norm = power_norm
         self.proj_l = nn.Linear(d, dc, bias=False)
         self.proj_r = nn.Linear(d, dc, bias=False)
 
@@ -68,6 +74,8 @@ class CovariancePooler(Pooler):
         XR = self.proj_r(Xm)                                      # [B, L, dc]
 
         C = torch.bmm(XL.transpose(1, 2), XR) / lengths.squeeze(-1).unsqueeze(-1).to(XL.dtype)
+        if self._power_norm:
+            C = isqrt_cov(C)                                      # [B, dc, dc]
         out = C.flatten(1)                                        # [B, dc²]
         return out.squeeze(0) if single else out
 
@@ -80,6 +88,10 @@ class CovariancePooler(Pooler):
     @property
     def embedding_dim(self) -> int:
         return self._dc ** 2
+
+    @property
+    def power_norm(self) -> bool:
+        return self._power_norm
 
     @property
     def d(self) -> int:
@@ -98,7 +110,12 @@ class CovariancePooler(Pooler):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
-            {"d": self._d, "dc": self._dc, "state_dict": self.state_dict()},
+            {
+                "d": self._d,
+                "dc": self._dc,
+                "power_norm": self._power_norm,
+                "state_dict": self.state_dict(),
+            },
             path,
         )
 
@@ -106,6 +123,6 @@ class CovariancePooler(Pooler):
     def from_pretrained(cls, path: Path | str) -> "CovariancePooler":
         """Restore a CovariancePooler with frozen projections from disk."""
         ckpt = torch.load(path, map_location="cpu", weights_only=True)
-        obj = cls(ckpt["d"], ckpt["dc"])
+        obj = cls(ckpt["d"], ckpt["dc"], power_norm=ckpt.get("power_norm", False))
         obj.load_state_dict(ckpt["state_dict"])
         return obj.freeze()

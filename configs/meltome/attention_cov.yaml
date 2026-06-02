@@ -1,0 +1,28 @@
+# Light-attention-weighted covariance pooling (LA + cov) on Meltome.
+# C = Σ_i α_i (U x_i)(U x_i)ᵀ with per-residue light-attention weights α
+# (Σ α = 1) and a tied projection U → symmetric PSD C. Output dim = dc².
+# Sweep dc with: --dc 8 16 24 32 48
+task: regression
+
+data:
+  train_embeddings: data/embeddings/meltome_train.h5
+  test_embeddings:  data/embeddings/meltome_test.h5
+  train_labels:     data/raw/meltome/train_labels.csv
+  test_labels:      data/raw/meltome/test_labels.csv
+
+pooling:
+  method: attention_cov
+  d: 1024
+  dc: 32
+  kernel_size: 9
+  power_norm: false      # set true for the LA + cov + matrix-power stack
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

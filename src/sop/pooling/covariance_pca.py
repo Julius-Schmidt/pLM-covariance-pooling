@@ -18,6 +18,7 @@ from typing import Callable, Iterator
 import torch
 
 from .base import Pooler
+from .matrix_power import isqrt_cov
 
 # A factory returning a fresh iterator of (X [L, d], mask [L] bool) pairs.
 # Must be callable multiple times — the streaming fit makes two passes.
@@ -43,7 +44,8 @@ class CovariancePCAPooler(Pooler):
     most of its significant digits to cancellation.
     """
 
-    def __init__(self, d: int, dc: int, center: bool = True) -> None:
+    def __init__(self, d: int, dc: int, center: bool = True,
+                 power_norm: bool = False) -> None:
         super().__init__()
         if dc <= 0:
             raise ValueError(f"dc must be positive, got {dc}")
@@ -53,6 +55,9 @@ class CovariancePCAPooler(Pooler):
         self._d = d
         self._dc = dc
         self._center = center
+        # C is symmetric PSD here (tied projection), so the matrix square root
+        # is exact in the eigenbasis — the ideal case for power normalisation.
+        self._power_norm = power_norm
         # Buffers (not Parameters) — these are not learned by SGD and should
         # move with ``.to(device)`` and serialise via ``state_dict``.
         self.register_buffer("proj", torch.zeros(d, dc))
@@ -138,11 +143,19 @@ class CovariancePCAPooler(Pooler):
         C = torch.bmm(Xp.transpose(1, 2), Xp)                    # [B, dc, dc]
         C = C / lengths.squeeze(-1).unsqueeze(-1).to(Xp.dtype)
 
+        if self._power_norm:
+            C = isqrt_cov(C)                                      # [B, dc, dc]
+
         out = C.flatten(1)                                       # [B, dc²]
         return out.squeeze(0) if single else out
 
     def freeze(self) -> "CovariancePCAPooler":
         """No-op — proj/mean are buffers and never carry gradients."""
+        return self
+
+    def set_power_norm(self, power_norm: bool) -> "CovariancePCAPooler":
+        """Toggle matrix-power normalisation (e.g. after ``from_pretrained``)."""
+        self._power_norm = power_norm
         return self
 
     @property
@@ -173,6 +186,7 @@ class CovariancePCAPooler(Pooler):
                 "d": self._d,
                 "dc": self._dc,
                 "center": self._center,
+                "power_norm": self._power_norm,
                 "state_dict": self.state_dict(),
             },
             path,
@@ -181,7 +195,8 @@ class CovariancePCAPooler(Pooler):
     @classmethod
     def from_pretrained(cls, path: Path | str) -> "CovariancePCAPooler":
         ckpt = torch.load(path, map_location="cpu", weights_only=True)
-        obj = cls(ckpt["d"], ckpt["dc"], center=ckpt["center"])
+        obj = cls(ckpt["d"], ckpt["dc"], center=ckpt["center"],
+                  power_norm=ckpt.get("power_norm", False))
         obj.load_state_dict(ckpt["state_dict"])
         obj._fitted = True
         return obj

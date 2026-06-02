@@ -1,0 +1,26 @@
+# Light Attention pooling (Stärk et al. 2021) on subcellular localisation.
+# Two 1-D convs (values + attention) → [attention-weighted sum ; max], dim = 2·d.
+# Trained end-to-end with the probe head. No dc (this is a first-order pool).
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc_train.h5
+  test_embeddings:  data/embeddings/deeploc_test.h5
+  train_labels:     data/raw/deeploc/train_labels.csv
+  test_labels:      data/raw/deeploc/test_labels.csv
+
+pooling:
+  method: light_attention
+  d: 1024
+  kernel_size: 9         # conv width over the residue axis (Stärk default)
+  conv_dropout: 0.25
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

@@ -1,0 +1,25 @@
+# Light Attention pooling (Stärk et al. 2021) on Meltome thermostability.
+# Two 1-D convs (values + attention) → [attention-weighted sum ; max], dim = 2·d.
+task: regression
+
+data:
+  train_embeddings: data/embeddings/meltome_train.h5
+  test_embeddings:  data/embeddings/meltome_test.h5
+  train_labels:     data/raw/meltome/train_labels.csv
+  test_labels:      data/raw/meltome/test_labels.csv
+
+pooling:
+  method: light_attention
+  d: 1024
+  kernel_size: 9
+  conv_dropout: 0.25
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 30
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]
