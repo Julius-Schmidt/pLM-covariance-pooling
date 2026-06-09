@@ -22,27 +22,31 @@ import numpy as np
 from matplotlib.lines import Line2D
 
 
-METHOD_ORDER = ["mean", "cov_supervised", "cov_unsupervised", "cov_pca", "hybrid"]
+METHOD_ORDER = ["mean", "cov_supervised", "cov_unsupervised", "cov_pca", "hybrid",
+                "light_attention"]
 METHOD_LABEL = {
-    "mean":            "Mean",
-    "cov_supervised":  "Cov supervised",
-    "cov_unsupervised":"Cov unsupervised",
-    "cov_pca":         "Cov PCA",
-    "hybrid":          "Hybrid [μ; C]",
+    "mean":             "Mean",
+    "cov_supervised":   "Cov supervised",
+    "cov_unsupervised": "Cov unsupervised",
+    "cov_pca":          "Cov PCA",
+    "hybrid":           "Hybrid [μ; C]",
+    "light_attention":  "Light Attention",
 }
 METHOD_COLOR = {
-    "mean":            "#6f6f6f",
-    "cov_supervised":  "#3a78c2",
-    "cov_unsupervised":"#92b8e6",
-    "cov_pca":         "#c8c2b0",
-    "hybrid":          "#2ea27a",
+    "mean":             "#6f6f6f",
+    "cov_supervised":   "#3a78c2",
+    "cov_unsupervised": "#92b8e6",
+    "cov_pca":          "#c8c2b0",
+    "hybrid":           "#2ea27a",
+    "light_attention":  "#7ECBA1",
 }
 METHOD_LS = {
-    "mean":            "-",
-    "cov_supervised":  "-",
-    "cov_unsupervised":"--",
-    "cov_pca":         "--",
-    "hybrid":          "-",
+    "mean":             "-",
+    "cov_supervised":   "-",
+    "cov_unsupervised": "--",
+    "cov_pca":          "--",
+    "hybrid":           "-",
+    "light_attention":  "-",
 }
 
 DEEPLOC_SHORT = {
@@ -74,14 +78,20 @@ DEEPLOC_CLASS_ORDER = [
 ]
 
 plt.rcParams.update({
-    "figure.dpi": 120,
-    "savefig.dpi": 150,
-    "font.size": 11,
-    "axes.spines.top": False,
+    "figure.dpi":        120,
+    "savefig.dpi":       150,
+    "font.family":       "sans-serif",
+    "font.size":         11,
+    "axes.spines.top":   False,
     "axes.spines.right": False,
-    "axes.grid": True,
-    "grid.alpha": 0.25,
-    "grid.linestyle": "-",
+    "axes.linewidth":    0.8,
+    "axes.axisbelow":    True,
+    "axes.grid":         True,
+    "grid.color":        "#CCCCCC",
+    "grid.linewidth":    0.7,
+    "grid.linestyle":    "-",
+    "xtick.major.size":  0,
+    "ytick.major.size":  3,
 })
 
 
@@ -142,7 +152,7 @@ def plot_main_bar(runs: list[dict], task: str, out_path: Path, dc: int = 32) -> 
     stds = [r[2] for r in rows]
     colors = [METHOD_COLOR[r[0]] for r in rows]
     bars = ax.bar(xs, means, yerr=stds, capsize=4, color=colors,
-                  edgecolor="white", linewidth=0.8)
+                  edgecolor="none", linewidth=0.8)
     ax.set_xticks(xs)
     ax.set_xticklabels([METHOD_LABEL[r[0]].replace(" ", "\n", 1) for r in rows])
     if task == "classification":
@@ -163,7 +173,7 @@ def plot_main_bar(runs: list[dict], task: str, out_path: Path, dc: int = 32) -> 
         hi = max(means) + 0.03
         ax.set_ylim(lo, hi)
         ax.set_title(f"Thermostability  ·  Meltome  ·  dc = {dc}")
-    ax.grid(True, axis="y", alpha=0.3)
+    ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
@@ -173,7 +183,8 @@ def plot_main_bar(runs: list[dict], task: str, out_path: Path, dc: int = 32) -> 
 # Plot 2: dc-sweep efficiency curve (cov_supervised) with mean baseline
 # ---------------------------------------------------------------------------
 
-def plot_dc_sweep(runs: list[dict], task: str, out_path: Path) -> None:
+def plot_dc_sweep(runs: list[dict], task: str, out_path: Path,
+                  la_run: dict | None = None) -> None:
     mkey = metric_key(task)
     # Every covariance method that was swept gets a full line; a method present
     # at only one dc falls back to a single marker. Annotate embedding dims on
@@ -217,6 +228,12 @@ def plot_dc_sweep(runs: list[dict], task: str, out_path: Path) -> None:
                          + (f"{m*100:.1f}%" if task == "classification" else f"{m:.3f}"))
         ax.axhspan(m - s, m + s, color=METHOD_COLOR["mean"], alpha=0.12)
 
+    if la_run is not None and task == "classification":
+        m, s = la_run[f"{mkey}_mean"], la_run[f"{mkey}_std"]
+        ax.axhline(m, color=METHOD_COLOR["light_attention"], linestyle="--",
+                   label=f"Light Attention = {m*100:.1f}%")
+        ax.axhspan(m - s, m + s, color=METHOD_COLOR["light_attention"], alpha=0.12)
+
     ax.set_xlabel("Bottleneck dimension dc  (covariance is dc × dc)")
     if task == "classification":
         ax.set_ylabel("Accuracy (%)")
@@ -230,7 +247,7 @@ def plot_dc_sweep(runs: list[dict], task: str, out_path: Path) -> None:
     ax.set_ylim(y_lo - 0.005, y_hi + 0.005)
     ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5),
               fontsize=9, frameon=True)
-    ax.grid(True, alpha=0.3)
+    ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
@@ -276,7 +293,7 @@ def plot_training_dynamics(runs: list[dict], task: str, out_path: Path, dc: int 
         ax.set_ylabel("Validation Spearman R")
         ax.set_title("Meltome training dynamics  ·  mean ± 1 std, 3 seeds")
     ax.legend(loc="lower right", frameon=True, fontsize=10)
-    ax.grid(True, alpha=0.3)
+    ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
@@ -299,7 +316,8 @@ def _per_class_accuracy_per_seed(r: dict, n_classes: int) -> np.ndarray:
     return out
 
 
-def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32) -> None:
+def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32,
+                               la_run: dict | None = None) -> None:
     cls_runs = [r for r in runs if r["task"] == "classification"]
     mean_r = next((r for r in cls_runs if r["method"] == "mean"), None)
     if mean_r is None or "label_to_index" not in mean_r:
@@ -314,7 +332,7 @@ def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32) -
     order_idx = np.array([label_map[c] for c in ordered_names])
     n = len(ordered_names)
 
-    methods = [m for m in METHOD_ORDER if m != "mean"]
+    methods = [m for m in METHOD_ORDER if m not in ("mean", "light_attention")]
     series: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     arr = _per_class_accuracy_per_seed(mean_r, len(label_map))[:, order_idx]
     series["mean"] = (np.nanmean(arr, axis=0), np.nanstd(arr, axis=0))
@@ -333,16 +351,30 @@ def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32) -
                yerr=std * 100, capsize=2.5,
                error_kw=dict(elinewidth=0.8, ecolor="#222"),
                color=METHOD_COLOR[m], label=METHOD_LABEL[m],
-               edgecolor="white", linewidth=0.5)
+               edgecolor="none", linewidth=0.5)
+
+    if la_run is not None:
+        la_mean = la_run["accuracy_mean"] * 100
+        la_std = la_run["accuracy_std"] * 100
+        ax.axhline(la_mean, color=METHOD_COLOR["light_attention"], linestyle="--",
+                   linewidth=1.5, zorder=4,
+                   label=f"{METHOD_LABEL['light_attention']} overall = {la_mean:.1f}%")
+        ax.axhspan(la_mean - la_std, la_mean + la_std,
+                   color=METHOD_COLOR["light_attention"], alpha=0.12, zorder=1)
+
     ax.set_xticks(xs)
     ax.set_xticklabels([DEEPLOC_SHORT[c] for c in ordered_names],
                        rotation=20, ha="right")
     ax.set_ylabel("Per-class accuracy (%)")
     ax.set_ylim(0, 105)
-    ax.set_title("DeepLoc · per-class accuracy by pooling method  ·  dc = 32  ·  classes ordered by training-set frequency  ·  mean ± 1 std (3 seeds)")
-    ax.legend(ncols=len(series), loc="upper center", bbox_to_anchor=(0.5, -0.12),
+    ax.set_title(
+        f"DeepLoc · per-class accuracy by pooling method  ·  dc = {dc}  ·  "
+        "classes ordered by training-set frequency  ·  mean ± 1 std (3 seeds)"
+    )
+    n_legend = len(series) + (1 if la_run is not None else 0)
+    ax.legend(ncols=n_legend, loc="upper center", bbox_to_anchor=(0.5, -0.12),
               frameon=False, fontsize=10)
-    ax.grid(True, axis="y", alpha=0.3)
+    ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
@@ -438,7 +470,7 @@ def plot_meltome_scatter(runs: list[dict], out_path: Path, dc: int = 32) -> None
         ax.set_aspect("equal", "box")
         sr = r["spearman_r_mean"]
         ax.set_title(f"{METHOD_LABEL[method]}\nSpearman R = {sr:.3f}", fontsize=10)
-        ax.grid(True, alpha=0.3)
+        ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
 
     # Hide unused axes
     for ax in axes.flat[len(panels):]:
@@ -515,7 +547,7 @@ def plot_param_efficiency(runs: list[dict], task: str, out_path: Path) -> None:
         ax.set_ylabel("Spearman R")
         ax.set_title("Meltome · parameter efficiency")
     ax.legend(loc="lower right", fontsize=9, frameon=True)
-    ax.grid(True, which="both", alpha=0.3)
+    ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
@@ -562,21 +594,25 @@ def plot_light_attention_comparison(runs: list[dict], out_path: Path,
         ]))
 
     # Collect our methods (all use FNN probe on ProtT5 = distilled ProtT5)
+    SHORT_LABELS = {
+        "cov_supervised":  "Cov sup",
+        "cov_unsupervised":"Cov unsup",
+        "cov_pca":         "Cov PCA",
+        "hybrid":          "Hybrid",
+        "light_attention": "Light Att.",
+    }
     ours: list[tuple[str, float, float, str]] = []
     for m in METHOD_ORDER:
         if m == "mean":
             r = next((x for x in cls_runs if x["method"] == "mean"), None)
             label = "ProtT5\nMean"
+        elif m == "light_attention":
+            r = next((x for x in cls_runs if x["method"] == "light_attention"), None)
+            label = f"ProtT5\n{SHORT_LABELS[m]}"
         else:
             r = next((x for x in cls_runs
                       if x["method"] == m and x.get("dc") == dc), None)
-            short = {
-                "cov_supervised": "Cov sup",
-                "cov_unsupervised": "Cov unsup",
-                "cov_pca": "Cov PCA",
-                "hybrid": "Hybrid",
-            }[m]
-            label = f"ProtT5\n{short}"
+            label = f"ProtT5\n{SHORT_LABELS[m]}"
         if r is not None:
             ours.append((label, r["accuracy_mean"] * 100,
                          r["accuracy_std"] * 100, m))
@@ -611,7 +647,7 @@ def plot_light_attention_comparison(runs: list[dict], out_path: Path,
         section_spans.append((start, x - 1, sec_name))
         x += 1  # gap between sections
 
-    bars = ax.bar(positions, values, color=colors, edgecolor="white",
+    bars = ax.bar(positions, values, color=colors, edgecolor="none",
                   linewidth=0.7)
 
     # Add error bars + percentage labels for our bars only
@@ -629,7 +665,7 @@ def plot_light_attention_comparison(runs: list[dict], out_path: Path,
     ax.set_ylabel("10-state accuracy Q10 (setDeepLoc, %)")
     ax.set_ylim(0, 100)
     ax.set_title("DeepLoc Q10 benchmark  ·  Stärk et al. 2021 (grey) vs ours (coloured)")
-    ax.grid(True, axis="y", alpha=0.3)
+    ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
 
     # Section dividers + headers
     for i, (lo, hi, name) in enumerate(section_spans):
@@ -691,28 +727,46 @@ def main() -> None:
 
     write_summary_table(runs, args.out / "summary_table.tsv")
 
+    la_run = next((r for r in cls_runs if r.get("method") == "light_attention"), None)
+    sweep_dcs = [8, 16, 24, 32, 48]
+
     if cls_runs:
         plot_main_bar(cls_runs, "classification", deeploc_dir / "fig_deeploc_bar.png", dc=args.dc)
         plot_training_dynamics(cls_runs, "classification",
                                deeploc_dir / "fig_deeploc_training.png", dc=args.dc)
         plot_per_class_all_methods(cls_runs, deeploc_dir / "fig_deeploc_per_class.png",
                                    dc=args.dc)
-        plot_dc_sweep(cls_runs, "classification", deeploc_dir / "fig_deeploc_dc_sweep.png")
+        # dc-sweep bar and per-class plots (one per dc, new files)
+        for dc_val in sweep_dcs:
+            plot_main_bar(cls_runs, "classification",
+                          deeploc_dir / f"fig_deeploc_bar_dc{dc_val}.png", dc=dc_val)
+            plot_per_class_all_methods(cls_runs,
+                                       deeploc_dir / f"fig_deeploc_per_class_dc{dc_val}.png",
+                                       dc=dc_val)
+        # dc-sweep line chart with LA reference
+        plot_dc_sweep(cls_runs, "classification",
+                      deeploc_dir / "fig_deeploc_dc_sweep_la.png", la_run=la_run)
         plot_param_efficiency(cls_runs, "classification",
                               deeploc_dir / "fig_deeploc_param_efficiency.png")
         plot_confusion_matrix(cls_runs, "hybrid",
                               deeploc_dir / "fig_deeploc_confusion_hybrid.png", dc=args.dc)
         plot_confusion_matrix(cls_runs, "mean",
                               deeploc_dir / "fig_deeploc_confusion_mean.png")
+        # LA comparison with light_attention bar (dc=48 = best performing)
         plot_light_attention_comparison(
-            cls_runs, deeploc_dir / "fig_deeploc_vs_light_attention.png", dc=args.dc)
+            cls_runs, deeploc_dir / "fig_deeploc_vs_light_attention_la.png", dc=48)
 
     if reg_runs:
         plot_main_bar(reg_runs, "regression", meltome_dir / "fig_meltome_bar.png", dc=args.dc)
         plot_training_dynamics(reg_runs, "regression",
                                meltome_dir / "fig_meltome_training.png", dc=args.dc)
         plot_meltome_scatter(reg_runs, meltome_dir / "fig_meltome_scatter.png", dc=args.dc)
-        plot_dc_sweep(reg_runs, "regression", meltome_dir / "fig_meltome_dc_sweep.png")
+        # per-dc bar charts (one per dc)
+        for dc_val in sweep_dcs:
+            plot_main_bar(reg_runs, "regression",
+                          meltome_dir / f"fig_meltome_bar_dc{dc_val}.png", dc=dc_val)
+        plot_dc_sweep(reg_runs, "regression",
+                      meltome_dir / "fig_meltome_dc_sweep_la.png")
         plot_param_efficiency(reg_runs, "regression",
                               meltome_dir / "fig_meltome_param_efficiency.png")
 
