@@ -731,7 +731,6 @@ def main() -> None:
     sweep_dcs = [8, 16, 24, 32, 48]
 
     if cls_runs:
-        plot_main_bar(cls_runs, "classification", deeploc_dir / "fig_deeploc_bar.png", dc=args.dc)
         plot_training_dynamics(cls_runs, "classification",
                                deeploc_dir / "fig_deeploc_training.png", dc=args.dc)
         plot_per_class_all_methods(cls_runs, deeploc_dir / "fig_deeploc_per_class.png",
