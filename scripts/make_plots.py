@@ -136,6 +136,8 @@ def plot_main_bar(runs: list[dict], task: str, out_path: Path, dc: int = 32) -> 
     for m in METHOD_ORDER:
         if m == "mean":
             cand = [r for r in runs if r["method"] == "mean"]
+        elif m == "light_attention":
+            cand = [r for r in runs if r["method"] == "light_attention"]
         else:
             cand = [r for r in runs if r["method"] == m and r.get("dc") == dc]
         if not cand:
@@ -264,6 +266,8 @@ def plot_training_dynamics(runs: list[dict], task: str, out_path: Path, dc: int 
     for m in METHOD_ORDER:
         if m == "mean":
             r = next((x for x in runs if x["method"] == "mean"), None)
+        elif m == "light_attention":
+            r = next((x for x in runs if x["method"] == "light_attention"), None)
         else:
             r = next((x for x in runs
                       if x["method"] == m and x.get("dc") == dc), None)
@@ -316,8 +320,7 @@ def _per_class_accuracy_per_seed(r: dict, n_classes: int) -> np.ndarray:
     return out
 
 
-def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32,
-                               la_run: dict | None = None) -> None:
+def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32) -> None:
     cls_runs = [r for r in runs if r["task"] == "classification"]
     mean_r = next((r for r in cls_runs if r["method"] == "mean"), None)
     if mean_r is None or "label_to_index" not in mean_r:
@@ -332,12 +335,15 @@ def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32,
     order_idx = np.array([label_map[c] for c in ordered_names])
     n = len(ordered_names)
 
-    methods = [m for m in METHOD_ORDER if m not in ("mean", "light_attention")]
+    methods = [m for m in METHOD_ORDER if m != "mean"]
     series: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     arr = _per_class_accuracy_per_seed(mean_r, len(label_map))[:, order_idx]
     series["mean"] = (np.nanmean(arr, axis=0), np.nanstd(arr, axis=0))
     for m in methods:
-        r = next((x for x in cls_runs if x["method"] == m and x.get("dc") == dc), None)
+        if m == "light_attention":
+            r = next((x for x in cls_runs if x["method"] == "light_attention"), None)
+        else:
+            r = next((x for x in cls_runs if x["method"] == m and x.get("dc") == dc), None)
         if r is not None:
             arr = _per_class_accuracy_per_seed(r, len(label_map))[:, order_idx]
             series[m] = (np.nanmean(arr, axis=0), np.nanstd(arr, axis=0))
@@ -353,15 +359,6 @@ def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32,
                color=METHOD_COLOR[m], label=METHOD_LABEL[m],
                edgecolor="none", linewidth=0.5)
 
-    if la_run is not None:
-        la_mean = la_run["accuracy_mean"] * 100
-        la_std = la_run["accuracy_std"] * 100
-        ax.axhline(la_mean, color=METHOD_COLOR["light_attention"], linestyle="--",
-                   linewidth=1.5, zorder=4,
-                   label=f"{METHOD_LABEL['light_attention']} overall = {la_mean:.1f}%")
-        ax.axhspan(la_mean - la_std, la_mean + la_std,
-                   color=METHOD_COLOR["light_attention"], alpha=0.12, zorder=1)
-
     ax.set_xticks(xs)
     ax.set_xticklabels([DEEPLOC_SHORT[c] for c in ordered_names],
                        rotation=20, ha="right")
@@ -371,8 +368,7 @@ def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32,
         f"DeepLoc · per-class accuracy by pooling method  ·  dc = {dc}  ·  "
         "classes ordered by training-set frequency  ·  mean ± 1 std (3 seeds)"
     )
-    n_legend = len(series) + (1 if la_run is not None else 0)
-    ax.legend(ncols=n_legend, loc="upper center", bbox_to_anchor=(0.5, -0.12),
+    ax.legend(ncols=len(series), loc="upper center", bbox_to_anchor=(0.5, -0.12),
               frameon=False, fontsize=10)
     ax.yaxis.grid(True, color="#CCCCCC", linewidth=0.7, zorder=0)
     fig.tight_layout()
@@ -386,8 +382,8 @@ def plot_per_class_all_methods(runs: list[dict], out_path: Path, dc: int = 32,
 
 def plot_confusion_matrix(runs: list[dict], method: str, out_path: Path, dc: int = 32) -> None:
     cls_runs = [r for r in runs if r["task"] == "classification"]
-    if method == "mean":
-        r = next((x for x in cls_runs if x["method"] == "mean"), None)
+    if method in ("mean", "light_attention"):
+        r = next((x for x in cls_runs if x["method"] == method), None)
     else:
         r = next((x for x in cls_runs if x["method"] == method and x.get("dc") == dc), None)
     if r is None or "label_to_index" not in r:
@@ -536,6 +532,14 @@ def plot_param_efficiency(runs: list[dict], task: str, out_path: Path) -> None:
                    label=f"Mean (d={d})")
         ax.axhspan(m_v - s_v, m_v + s_v, color=METHOD_COLOR["mean"], alpha=0.12)
         ax.axvline(d, color=METHOD_COLOR["mean"], linestyle=":", alpha=0.5)
+
+    la_r = next((r for r in runs if r["method"] == "light_attention"), None)
+    if la_r is not None:
+        m_v, s_v = la_r[f"{mkey}_mean"], la_r[f"{mkey}_std"]
+        d = la_r["embedding_dim"]
+        ax.errorbar([d], [m_v], yerr=[s_v], fmt="*", capsize=3, markersize=11,
+                    color=METHOD_COLOR["light_attention"],
+                    label=f"{METHOD_LABEL['light_attention']} (d={d})")
 
     ax.set_xscale("log")
     ax.set_xlabel("Pooled embedding dimension (log)")
@@ -751,6 +755,8 @@ def main() -> None:
                               deeploc_dir / "fig_deeploc_confusion_hybrid.png", dc=args.dc)
         plot_confusion_matrix(cls_runs, "mean",
                               deeploc_dir / "fig_deeploc_confusion_mean.png")
+        plot_confusion_matrix(cls_runs, "light_attention",
+                              deeploc_dir / "fig_deeploc_confusion_light_attention.png")
         # LA comparison with light_attention bar (dc=48 = best performing)
         plot_light_attention_comparison(
             cls_runs, deeploc_dir / "fig_deeploc_vs_light_attention_la.png", dc=48)
