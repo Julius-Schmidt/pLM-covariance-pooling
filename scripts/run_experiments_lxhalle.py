@@ -144,6 +144,7 @@ def build_pooler(pooling_cfg: dict) -> Pooler:
     if method == "light_attention":
         return LightAttentionPooler(
             d,
+            d_out=pooling_cfg.get("dc"),
             kernel_size=pooling_cfg.get("kernel_size", 9),
             conv_dropout=pooling_cfg.get("conv_dropout", 0.25),
         )

@@ -191,7 +191,7 @@ def plot_dc_sweep(runs: list[dict], task: str, out_path: Path,
     # Every covariance method that was swept gets a full line; a method present
     # at only one dc falls back to a single marker. Annotate embedding dims on
     # cov_supervised only (the others would clutter the panel).
-    cov_methods = ["cov_supervised", "cov_unsupervised", "cov_pca", "hybrid"]
+    cov_methods = ["cov_supervised", "cov_unsupervised", "cov_pca", "hybrid", "light_attention"]
     series: dict[str, list[dict]] = {}
     for m in cov_methods:
         pts = sorted((r for r in runs if r["method"] == m and r.get("dc") is not None),
@@ -230,7 +230,7 @@ def plot_dc_sweep(runs: list[dict], task: str, out_path: Path,
                          + (f"{m*100:.1f}%" if task == "classification" else f"{m:.3f}"))
         ax.axhspan(m - s, m + s, color=METHOD_COLOR["mean"], alpha=0.12)
 
-    if la_run is not None and task == "classification":
+    if la_run is not None and task == "classification" and "light_attention" not in series:
         m, s = la_run[f"{mkey}_mean"], la_run[f"{mkey}_std"]
         ax.axhline(m, color=METHOD_COLOR["light_attention"], linestyle="--",
                    label=f"Light Attention = {m*100:.1f}%")

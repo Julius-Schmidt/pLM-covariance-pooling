@@ -33,18 +33,29 @@ class LightAttentionPooler(Pooler):
     it (use :class:`AttentionCovariancePooler` for LA + covariance).
     """
 
-    def __init__(self, d: int, kernel_size: int = 9, conv_dropout: float = 0.25) -> None:
+    def __init__(
+        self,
+        d: int,
+        d_out: int | None = None,
+        kernel_size: int = 9,
+        conv_dropout: float = 0.25,
+    ) -> None:
         """
         Args:
-            d: Input (and per-branch output) embedding dimension.
+            d: Input embedding dimension.
+            d_out: Number of output channels per conv branch. Output dim is
+                ``2 * d_out``. Defaults to ``d`` (original Stärk behaviour).
+                Set to a smaller value (e.g. via ``--dc`` sweep) to trade
+                capacity for a compact embedding comparable to other methods.
             kernel_size: Conv width over the residue axis (Stärk uses 9).
             conv_dropout: Dropout on the value-convolution output.
         """
         super().__init__()
         self._d = d
+        self._d_out = d_out if d_out is not None else d
         padding = kernel_size // 2
-        self.feature_conv = nn.Conv1d(d, d, kernel_size, padding=padding)
-        self.attention_conv = nn.Conv1d(d, d, kernel_size, padding=padding)
+        self.feature_conv = nn.Conv1d(d, self._d_out, kernel_size, padding=padding)
+        self.attention_conv = nn.Conv1d(d, self._d_out, kernel_size, padding=padding)
         self.dropout = nn.Dropout(conv_dropout)
 
     def pool(self, X: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -74,7 +85,7 @@ class LightAttentionPooler(Pooler):
 
     @property
     def embedding_dim(self) -> int:
-        return 2 * self._d
+        return 2 * self._d_out
 
     @property
     def d(self) -> int:
