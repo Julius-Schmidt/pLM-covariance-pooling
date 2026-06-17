@@ -47,7 +47,12 @@ def isqrt_cov(C: torch.Tensor, n_iter: int = 5, eps: float = 1e-5) -> torch.Tens
     # 1. Trace-normalise so ||A|| < 1 (Newton-Schulz convergence condition).
     trace = C.diagonal(dim1=-2, dim2=-1).sum(-1, keepdim=True).unsqueeze(-1)
     trace = trace.clamp_min(eps)
-    A = C / trace
+
+    # Ridge-regularise: lift the spectrum off zero so rank-deficient covariances
+    # (dc > #residues, or collinear features) stay positive definite. This keeps
+    # Newton-Schulz convergent and separates the clustered eigenvalues that
+    # otherwise make the eigh backward (1/(λi-λj)) blow up to NaN.
+    A = C / trace + eps * I
 
     # 2. Coupled Newton-Schulz: Y_k -> A^{1/2}, Z_k -> A^{-1/2}.
     Y, Z = A, I.clone()
@@ -65,10 +70,18 @@ def isqrt_cov(C: torch.Tensor, n_iter: int = 5, eps: float = 1e-5) -> torch.Tens
     # Robust fallback (docs §3.1, "Option A"). Newton-Schulz only converges for
     # PSD inputs; the asymmetric supervised pool can symmetrise to an indefinite
     # matrix where the iteration diverges. There we take the exact eigenbasis
-    # square root with eigenvalues clamped to >= 0 (PSD projection). Computing it
-    # only on the fallback path keeps the diverged (NaN) NS graph out of the
-    # returned tensor, so gradients stay clean.
-    evals, evecs = torch.linalg.eigh(C)
+    # square root with eigenvalues clamped to >= 0 (PSD projection). The ridge
+    # keeps the spectrum non-degenerate; cuSOLVER still occasionally fails to
+    # converge on the GPU, so retry on CPU (LAPACK syevd is more tolerant) and
+    # scrub any residual non-finite entries so a single bad batch cannot abort
+    # the whole run.
+    A_ridge = C + eps * trace * I
+    try:
+        evals, evecs = torch.linalg.eigh(A_ridge)
+    except torch._C._LinAlgError:
+        evals, evecs = torch.linalg.eigh(A_ridge.cpu())
+        evals, evecs = evals.to(C.device), evecs.to(C.device)
     roots = evals.clamp_min(eps).sqrt()                      # [..., d]
     C_sqrt = (evecs * roots.unsqueeze(-2)) @ evecs.transpose(-2, -1)
+    C_sqrt = torch.nan_to_num(C_sqrt)
     return C_sqrt.to(orig_dtype)

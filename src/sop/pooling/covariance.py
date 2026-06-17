@@ -29,7 +29,9 @@ class CovariancePooler(Pooler):
 
     Note: ``L`` and ``R`` are independent (not tied), so C is asymmetric in
     general. This is what distinguishes the autoencoder formulation from the
-    PCA special case (where L = R and C is symmetric / PSD).
+    PCA special case (where L = R and C is symmetric / PSD). When
+    ``power_norm=True`` the pool ties to a single projection so the covariance
+    is PSD and ``C^{1/2}`` is well-defined (see ``__init__``).
     """
 
     def __init__(self, d: int, dc: int, power_norm: bool = False) -> None:
@@ -37,10 +39,11 @@ class CovariancePooler(Pooler):
         Args:
             d:  Input embedding dimension (e.g. 1024 for ProtX).
             dc: Bottleneck dimension. Output is dc² floats.
-            power_norm: If True, apply matrix square-root normalisation
-                ``C -> C^{1/2}`` (iSQRT-COV) before flattening. Since L, R are
-                independent, C is asymmetric and its symmetric part is used
-                (see ``matrix_power.isqrt_cov``).
+            power_norm: If True, form a symmetric PSD covariance from a single
+                tied projection ``C = (X R)ᵀ(X R) / L`` and apply matrix
+                square-root normalisation ``C -> C^{1/2}`` (iSQRT-COV) before
+                flattening. (The two-projection cross term is indefinite, so its
+                square root is undefined; ``proj_l`` is unused in this mode.)
         """
         super().__init__()
         self._d = d
@@ -70,12 +73,19 @@ class CovariancePooler(Pooler):
         # Zero padded rows so they cannot contribute to the bilinear sum,
         # even if the caller passed non-zero values at masked positions.
         Xm = X * mask_f
-        XL = self.proj_l(Xm)                                      # [B, L, dc]
         XR = self.proj_r(Xm)                                      # [B, L, dc]
+        denom = lengths.squeeze(-1).unsqueeze(-1).to(XR.dtype)
 
-        C = torch.bmm(XL.transpose(1, 2), XR) / lengths.squeeze(-1).unsqueeze(-1).to(XL.dtype)
         if self._power_norm:
+            # iSQRT-COV requires a symmetric PSD covariance. The two-projection
+            # cross term (XL)ᵀ(XR) is asymmetric/indefinite, so C^{1/2} is not
+            # defined and the iteration diverges. Tie the projection (single
+            # proj_r) to form a genuine PSD covariance before the square root.
+            C = torch.bmm(XR.transpose(1, 2), XR) / denom        # [B, dc, dc], PSD
             C = isqrt_cov(C)                                      # [B, dc, dc]
+        else:
+            XL = self.proj_l(Xm)                                  # [B, L, dc]
+            C = torch.bmm(XL.transpose(1, 2), XR) / denom
         out = C.flatten(1)                                        # [B, dc²]
         return out.squeeze(0) if single else out
 
