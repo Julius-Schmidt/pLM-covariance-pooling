@@ -1,6 +1,6 @@
 # Light Attention pooling (Stärk et al. 2021) on DeepLoc 2.
 # No dc (first-order pool). Output dim = 2·d.
-task: classification
+task: multilabel_classification
 
 data:
   train_embeddings: data/embeddings/deeploc2_train.h5

@@ -3,7 +3,7 @@
 #   python scripts/train_unsupervised_pool.py \
 #       --embeddings data/embeddings/deeploc2_train.h5 --d 1024 --dc 32 \
 #       --output models/deeploc2_unsup_pooler_dc32.pt
-task: classification
+task: multilabel_classification
 
 data:
   train_embeddings: data/embeddings/deeploc2_train.h5

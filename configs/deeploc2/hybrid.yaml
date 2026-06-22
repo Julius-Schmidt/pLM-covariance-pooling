@@ -1,6 +1,6 @@
 # Hybrid pooling [μ ; flat(C)] on DeepLoc 2.
 # Sweep dc with: --dc 8 16 24 32 48
-task: classification
+task: multilabel_classification
 
 data:
   train_embeddings: data/embeddings/deeploc2_train.h5

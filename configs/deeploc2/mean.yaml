@@ -1,5 +1,5 @@
 # Mean-pooling baseline on DeepLoc 2 (multi-class subcellular localisation).
-task: classification
+task: multilabel_classification
 
 data:
   train_embeddings: data/embeddings/deeploc2_train.h5
