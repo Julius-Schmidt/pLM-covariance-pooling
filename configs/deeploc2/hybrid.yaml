@@ -1,0 +1,26 @@
+# Hybrid pooling [μ ; flat(C)] on DeepLoc 2.
+# Sweep dc with: --dc 8 16 24 32 48
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc2_train.h5
+  test_embeddings:  data/embeddings/deeploc2_test.h5
+  train_labels:     data/raw/deeploc2/train_labels.csv
+  test_labels:      data/raw/deeploc2/test_labels.csv
+
+pooling:
+  method: hybrid
+  d: 1024
+  dc: 32
+  # pretrained_path: models/deeploc2_unsup_pooler_dc32.pt   # uncomment to freeze cov branch
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 50
+  patience: 8
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

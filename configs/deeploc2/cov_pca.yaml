@@ -1,0 +1,29 @@
+# PCA covariance pooling on DeepLoc 2.
+# Requires a checkpoint produced by:
+#   python scripts/fit_pca_pool.py \
+#       --embeddings data/embeddings/deeploc2_train.h5 --d 1024 --dc 32 \
+#       --output models/deeploc2_pca_pooler_dc32.pt
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc2_train.h5
+  test_embeddings:  data/embeddings/deeploc2_test.h5
+  train_labels:     data/raw/deeploc2/train_labels.csv
+  test_labels:      data/raw/deeploc2/test_labels.csv
+
+pooling:
+  method: cov_pca
+  d: 1024
+  dc: 32
+  pretrained_path: models/deeploc2_pca_pooler_dc32.pt
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 50
+  patience: 8
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]

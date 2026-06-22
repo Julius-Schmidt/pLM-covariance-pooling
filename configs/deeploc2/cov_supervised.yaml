@@ -1,0 +1,25 @@
+# Supervised covariance pooling on DeepLoc 2.
+# Sweep dc with: --dc 8 16 24 32 48
+task: classification
+
+data:
+  train_embeddings: data/embeddings/deeploc2_train.h5
+  test_embeddings:  data/embeddings/deeploc2_test.h5
+  train_labels:     data/raw/deeploc2/train_labels.csv
+  test_labels:      data/raw/deeploc2/test_labels.csv
+
+pooling:
+  method: cov_supervised
+  d: 1024
+  dc: 32
+
+probe:
+  hidden_dim: 256
+  dropout: 0.1
+  batch_size: 64
+  epochs: 50
+  patience: 8
+  lr: 1.0e-3
+  weight_decay: 0.0
+
+seeds: [0, 1, 2]
