@@ -109,15 +109,28 @@ def _run_meta() -> dict:
 # Multi-label CSV loading
 # ---------------------------------------------------------------------------
 
+_DEEPLOC2_META_COLS = {"Unnamed: 0", "Kingdom", "Partition", "Sequence"}
+
 def load_multilabels(
-    path: Path, sep: str = "|"
+    path: Path,
+    sep: str = "|",
+    id_col: str | None = None,
+    meta_cols: set[str] | None = None,
 ) -> tuple[dict[str, list[str]], list[str]]:
     """Load a multi-label CSV.  Returns (id→[class_names], sorted_class_list).
 
+    id_col    — which column holds the protein accession (auto-detected if None).
+    meta_cols — columns to skip when finding class columns (non-binary metadata).
+
     Auto-detects format:
-      - If a column named "labels" or "label" exists → pipe/comma-separated values.
-      - Otherwise → every column except "id" is treated as a binary class indicator.
+      - If a column named "labels" or "label" exists → pipe-separated values.
+      - Otherwise → binary columns (1/0) after removing id_col and meta_cols.
+
+    DeepLoc 2 format example:
+      Unnamed: 0,ACC,Kingdom,Partition,Membrane,Cytoplasm,...,Sequence
     """
+    if meta_cols is None:
+        meta_cols = _DEEPLOC2_META_COLS
     delim = "\t" if path.suffix in {".tsv", ".tab"} else ","
     with open(path, newline="") as fh:
         rows = list(csv.DictReader(fh, delimiter=delim))
@@ -125,6 +138,16 @@ def load_multilabels(
         return {}, []
 
     columns = list(rows[0].keys())
+
+    # Auto-detect id column: explicit arg > "id" > "ACC" > first column
+    if id_col is None:
+        if "id" in columns:
+            id_col = "id"
+        elif "ACC" in columns:
+            id_col = "ACC"
+        else:
+            id_col = columns[0]
+
     id_to_labels: dict[str, list[str]] = {}
     all_classes: set[str] = set()
 
@@ -132,17 +155,18 @@ def load_multilabels(
         lbl_col = "labels" if "labels" in columns else "label"
         for row in rows:
             classes = [c.strip() for c in row[lbl_col].split(sep) if c.strip()]
-            id_to_labels[row["id"]] = classes
+            id_to_labels[row[id_col]] = classes
             all_classes.update(classes)
     else:
-        class_cols = [c for c in columns if c.lower() != "id"]
+        skip = meta_cols | {id_col}
+        class_cols = [c for c in columns if c not in skip]
         all_classes = set(class_cols)
         for row in rows:
             classes = [
                 c for c in class_cols
                 if row[c].strip() in ("1", "1.0", "True", "true", "yes")
             ]
-            id_to_labels[row["id"]] = classes
+            id_to_labels[row[id_col]] = classes
 
     return id_to_labels, sorted(all_classes)
 
@@ -239,8 +263,10 @@ def make_loaders(
     if num_workers > 0:
         loader_kwargs["prefetch_factor"] = 2
 
-    train_labels_raw, _ = load_multilabels(Path(cfg["data"]["train_labels"]))
-    test_labels_raw, _  = load_multilabels(Path(cfg["data"]["test_labels"]))
+    id_col = cfg["data"].get("id_col", None)
+    meta_cols = set(cfg["data"].get("meta_cols", [])) or None
+    train_labels_raw, _ = load_multilabels(Path(cfg["data"]["train_labels"]), id_col=id_col, meta_cols=meta_cols)
+    test_labels_raw, _  = load_multilabels(Path(cfg["data"]["test_labels"]),  id_col=id_col, meta_cols=meta_cols)
     train_ds = ProteinEmbeddingDataset(cfg["data"]["train_embeddings"], train_labels_raw)
     test_ds  = ProteinEmbeddingDataset(cfg["data"]["test_embeddings"],  test_labels_raw)
 
@@ -380,8 +406,10 @@ def run_one(cfg: dict, dc_override: int | None, output_dir: Path, config_stem: s
     probe_cfg = cfg.get("probe", {})
 
     # Build label vocabulary from both splits so indices are consistent.
-    train_labels, train_classes = load_multilabels(Path(cfg["data"]["train_labels"]))
-    test_labels,  test_classes  = load_multilabels(Path(cfg["data"]["test_labels"]))
+    id_col = cfg["data"].get("id_col", None)
+    meta_cols = set(cfg["data"].get("meta_cols", [])) or None
+    train_labels, train_classes = load_multilabels(Path(cfg["data"]["train_labels"]), id_col=id_col, meta_cols=meta_cols)
+    test_labels,  test_classes  = load_multilabels(Path(cfg["data"]["test_labels"]),  id_col=id_col, meta_cols=meta_cols)
     all_classes   = sorted(set(train_classes) | set(test_classes))
     label_to_index = {cls: i for i, cls in enumerate(all_classes)}
     n_classes = len(all_classes)

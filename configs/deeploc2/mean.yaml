@@ -4,7 +4,9 @@ task: multilabel_classification
 data:
   train_embeddings: data/embeddings/deeploc2_train.h5
   test_embeddings:  data/embeddings/deeploc2_test.h5
-  train_labels:     data/raw/deeploc2/train_labels.csv   # columns: id, label
+  train_labels:     data/raw/deeploc2/train_labels.csv
+  id_col:           ACC
+  meta_cols:        [Unnamed: 0, Kingdom, Partition, Sequence]
   test_labels:      data/raw/deeploc2/test_labels.csv
 
 pooling:
